@@ -1,0 +1,128 @@
+project_types:
+  generic:
+    default:
+      active: true
+      always_fetch:
+        instructions:
+        - https://raw.githubusercontent.com/github/copilot-docs/main/docs/copilot/generic.md
+  go:
+    default:
+      active: true
+      always_fetch:
+        chatmodes:
+        - branch: main
+          paths:
+          - chatmodes/*.json
+          repo: golang/go-copilot
+        instructions:
+        - branch: main
+          paths:
+          - instructions/*.md
+          repo: golang/go-copilot
+  javascript:
+    default:
+      active: true
+      always_fetch:
+        chatmodes:
+        - branch: main
+          paths:
+          - chatmodes/*.json
+          repo: nodejs/nodejs-copilot
+        instructions:
+        - branch: main
+          paths:
+          - instructions/*.md
+          repo: nodejs/nodejs-copilot
+      conditional:
+        has_package_json:
+          instructions:
+          - https://raw.githubusercontent.com/npm/cli/latest/docs/copilot/package-json.md
+  python:
+    default:
+      active: true
+      always_fetch:
+        chatmodes:
+        - https://gist.github.com/coley-angel/d034c6d57d30eacc1e61b3280e9592f4/raw/a279a851fe41af00f06419184ffe438156ce7ace/gistfile1.txt
+        instructions:
+        - https://gist.githubusercontent.com/coley-angel/bd9c43ce8894a282ca32b514ffedb9b4/raw/aadc08804c9ecca8a0f6b93a8743896358ebd544/gistfile1.txt
+        prompts:
+        - https://gist.github.com/coley-angel/221569167d7d87cdf1b88baf458a2d4e/raw/bf764b4225f637046ab4b15b968e9de7d7e247c6/gistfile1.txt
+      conditional:
+        has_django:
+          chatmodes:
+          - branch: main
+            paths:
+            - chatmodes/*.json
+            repo: django/django-copilot
+          instructions:
+          - branch: main
+            paths:
+            - instructions/*.md
+            repo: django/django-copilot
+          prompts:
+          - branch: main
+            paths:
+            - prompts/*.md
+            repo: django/django-copilot
+        has_fastapi:
+          instructions:
+          - branch: main
+            paths:
+            - instructions/*.md
+            repo: tiangolo/fastapi-copilot
+        has_flask:
+          instructions:
+          - branch: main
+            paths:
+            - '*.md'
+            repo: pallets/flask-copilot
+        has_pyproject_toml:
+          instructions:
+          - https://raw.githubusercontent.com/pypa/setuptools/main/docs/userguide/pyproject_config.rst
+        has_requirements_txt:
+          instructions:
+          - https://raw.githubusercontent.com/pypa/pip/main/docs/copilot/requirements.md
+        has_setup_py:
+          instructions:
+          - https://raw.githubusercontent.com/pypa/setuptools/main/docs/copilot/setup.md
+    dev:
+      active: false
+      always_fetch:
+        chatmodes:
+        - https://gist.github.com/coley-angel/d034c6d57d30eacc1e61b3280e9592f4/raw/a279a851fe41af00f06419184ffe438156ce7ace/gistfile1.txt
+        instructions:
+        - https://gist.githubusercontent.com/coley-angel/bd9c43ce8894a282ca32b514ffedb9b4/raw/aadc08804c9ecca8a0f6b93a8743896358ebd544/gistfile1.txt
+        prompts:
+        - https://gist.github.com/coley-angel/221569167d7d87cdf1b88baf458a2d4e/raw/bf764b4225f637046ab4b15b968e9de7d7e247c6/gistfile1.txt
+      conditional:
+        has_pyproject_toml:
+          instructions:
+          - https://raw.githubusercontent.com/pypa/setuptools/main/docs/userguide/pyproject_config.rst
+  rust:
+    default:
+      active: true
+      always_fetch:
+        chatmodes:
+        - branch: main
+          paths:
+          - chatmodes/*.json
+          repo: rust-lang/rust-copilot
+        instructions:
+        - branch: main
+          paths:
+          - instructions/*.md
+          repo: rust-lang/rust-copilot
+  typescript:
+    default:
+      active: true
+      always_fetch:
+        chatmodes:
+        - branch: main
+          paths:
+          - chatmodes/*.json
+          repo: microsoft/typescript-copilot
+        instructions:
+        - branch: main
+          paths:
+          - instructions/*.md
+          repo: microsoft/typescript-copilot

@@ -1,0 +1,14 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# GitHub Copilot context files - ignore prompts but keep instructions and chatmodes
+.github/*/prompts/
+.github/*.prompts.md

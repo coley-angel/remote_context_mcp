@@ -1,0 +1,38 @@
+{
+  "servers": {
+    "remote-context": {
+      "command": "uv",
+      "args": [
+        "run", 
+        "python", 
+        "main.py"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "GITHUB_TOKEN": "${input:githubToken}",
+        "CONTEXT_CONFIG_FILE": "${input:configFile}",
+        "CONTEXT_WORKDIR": "${input:workDir}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "githubToken",
+      "description": "GitHub Personal Access Token (for API access)",
+      "type": "promptString",
+      "password": true
+    },
+    {
+      "id": "configFile",
+      "description": "Context configuration file path or URL",
+      "type": "promptString",
+      "default": "context_config.yaml"
+    },
+    {
+      "id": "workDir",
+      "description": "Working directory for context operations",
+      "type": "promptString",
+      "default": "${workspaceFolder}"
+    }
+  ]
+}

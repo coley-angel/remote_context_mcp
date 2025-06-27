@@ -1,0 +1,14 @@
+[project]
+name = "mcp-get-remote-context"
+version = "0.1.0"
+description = "MCP server for fetching and managing remote context files for GitHub Copilot"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "mcp>=1.10.1",
+    "httpx>=0.25.0",
+    "python-dotenv>=1.0.0",
+    "aiofiles>=23.2.0",
+    "pyyaml>=6.0.1",
+    "gitpython>=3.1.40",
+]

@@ -1,0 +1,14 @@
+{
+    "chat.promptFilesLocations": {
+        ".github/default/prompts": true,
+        ".github/dev/prompts": false
+    },
+    "chat.modeFilesLocations": {
+        ".github/default/chatmodes": true,
+        ".github/dev/chatmodes": false
+    },
+    "chat.instructionsFilesLocations": {
+        ".github/default/instructions": true,
+        ".github/dev/instructions": false
+    }
+}
