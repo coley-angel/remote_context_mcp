@@ -1,16 +1,22 @@
-# Remote Context MCP Server 🏴‍☠️
+# Instructions MCP Server 📚
 
-A Model Context Protocol (MCP) server that intelligently fetches and manages remote context files for GitHub Copilot. This server automatically detects project types and frameworks, then fetches relevant instructions, prompts, and chat modes using a flexible profile-based system.
+A Model Context Protocol (MCP) server that fetches and manages remote instruction files for GitHub Copilot from centralized team locations. This server focuses solely on instruction management using a profile-based system for team collaboration.
 
 ## 🌟 Features
 
-- **🔍 Automatic Project Detection**: Detects Python, JavaScript, TypeScript, Rust, Go, and other project types
-- **⚙️ Framework-Aware Context**: Identifies frameworks like React, Django, Flask, FastAPI, Next.js, Express, etc.
-- **📁 Profile-Based Management**: Multiple context profiles per project type (e.g., "default", "dev", "production")
-- **🎯 Smart Directory Organization**: Saves files to `.github/{profile}/instructions`, `.github/{profile}/chatmodes`, `.github/{profile}/prompts`
-- **🔧 VS Code Integration**: Automatically updates VS Code settings with all available profiles as options
+- **📁 Profile-Based Management**: Multiple instruction profiles for different teams/contexts (e.g., "default", "dev", "corporate")
+- **🏢 Centralized Storage**: Instructions stored in `~/vscode-instructions` by default for team sharing
+- **⚙️ User Settings Integration**: Automatically updates VS Code user settings instead of workspace settings
 - **🌐 GitHub Integration**: Built-in support for fetching files from GitHub repositories with wildcard patterns
-- **📊 Git Repository Analysis**: Extracts git metadata for additional context
+- **🔄 Easy Sync**: Simple commands to fetch and sync instruction files from remote locations
+
+## 🌟 Features
+
+- ** Profile-Based Management**: Multiple instruction profiles for different teams/contexts (e.g., "default", "dev", "corporate")
+- **� Centralized Storage**: Instructions stored in `~/vscode-instructions` by default for team sharing
+- **⚙️ User Settings Integration**: Automatically updates VS Code user settings instead of workspace settings
+- **🌐 GitHub Integration**: Built-in support for fetching files from GitHub repositories with wildcard patterns
+- **� Easy Sync**: Simple commands to fetch and sync instruction files from remote locations
 
 ## �️ AI Security for Organizations
 
@@ -221,120 +227,94 @@ Add the MCP server to your VS Code settings by creating or updating `.vscode/mcp
 
 #### 🎯 Core Tools
 
-1. **`fetch_and_setup_copilot_files`** - Main tool to fetch context files
-   - Auto-detects project type and active profile
-   - Downloads context files to profile-specific directories
-   - Updates VS Code settings with all available profiles
+1. **`fetch_and_sync_instructions`** - Main tool to fetch instruction files
+   - Fetches instructions for a specific profile (or active profile)
+   - Downloads files to centralized directory (`~/vscode-instructions/{profile}/`)
+   - Updates VS Code user settings automatically
 
-2. **`get_workspace_context`** - Analyze current workspace
-   - Detects project types and frameworks
-   - Provides suggestions for context fetching
+2. **`get_available_profiles`** - List all available profiles
+   - Shows profile configurations and directories
+   - Indicates which profile is currently active
 
-3. **`list_context_config`** - View current configuration
-   - Shows all project types and their profiles
-   - Displays URLs for each context type
-
-#### 🏷️ Profile Management
-
-4. **`set_active_profile`** - Switch active profile for a project type
+3. **`set_active_profile`** - Switch active profile
    ```json
    {
-     "project_type": "python",
-     "profile_name": "default"
+     "profile_name": "corporate"
    }
    ```
 
-5. **`get_available_profiles`** - List all profiles for a project type
-   ```json
-   {
-     "project_type": "python"
-   }
-   ```
+4. **`list_context_config`** - View current configuration
+   - Shows all profiles and their instruction URLs
 
 ## ⚙️ Configuration System
 
 ### Profile Structure
 
-The configuration uses a hierarchical profile system:
+The configuration uses a simple profile-based system:
 
 ```yaml
-project_types:
-  python:
-    default:           # Profile name
-      active: true     # Currently active profile
-      always_fetch:
-        instructions:
-          - "https://python-docs.com/guidelines.md"
-        chatmodes:
-          - "https://python-docs.com/chat-modes.json"
-        prompts:
-          - "https://python-docs.com/prompts.md"
-      conditional:
-        has_django:
-          instructions:
-            - repo: "django/django-copilot"
-              branch: "main"
-              paths: ["instructions/*.md"]
-    
-    dev:               # Alternative profile
-      active: false
-      always_fetch:
-        # Different URLs for development context
+profiles:
+  default:
+    active: true
+    instructions:
+      - "https://company.com/copilot/general-guidelines.md"
+      - repo: "your-org/copilot-instructions"
+        branch: "main"
+        paths: ["general/*.md"]
+  
+  corporate:
+    active: false
+    instructions:
+      - "https://company.com/copilot/corporate-guidelines.md"
+      - "https://company.com/copilot/security-guidelines.md"
+  
+  dev:
+    active: false
+    instructions:
+      - repo: "your-org/dev-instructions"
+        branch: "main"
+        paths: ["dev/*.md", "best-practices/*.md"]
 ```
 
-### Project Type Detection
+### Directory Structure
 
-Automatic detection based on file presence:
-
-- **Python**: `requirements.txt`, `setup.py`, `pyproject.toml`, `__init__.py`
-- **JavaScript**: `package.json`
-- **TypeScript**: `package.json` + `tsconfig.json` or `.ts` files
-- **Rust**: `Cargo.toml`
-- **Go**: `go.mod` or `.go` files
-
-### Framework Detection
-
-Smart framework detection analyzes:
-
-- **package.json** dependencies (React, Next.js, Express, TypeScript)
-- **requirements.txt** content (Django, Flask, FastAPI)
-- **pyproject.toml** dependencies
-- Configuration files (`tsconfig.json`, `Cargo.toml`, etc.)
-
-## 📂 Directory Structure
-
-Context files are organized by profile:
+Instructions are stored centrally in your home directory:
 
 ```
-.github/
+~/vscode-instructions/
 ├── default/              # Default profile
-│   ├── instructions/     # Instruction files
-│   ├── chatmodes/        # Chat mode configurations  
-│   └── prompts/          # Prompt files
-├── dev/                  # Development profile
-│   ├── instructions/
-│   ├── chatmodes/
-│   └── prompts/
-└── production/           # Production profile
-    ├── instructions/
-    ├── chatmodes/
-    └── prompts/
+│   ├── guidelines.instructions.md
+│   └── security.instructions.md
+├── corporate/            # Corporate profile
+│   └── corporate-guidelines.instructions.md
+└── dev/                  # Development profile
+    ├── dev-guidelines.instructions.md
+    └── best-practices.instructions.md
 ```
 
 ## 🎯 Workflow Examples
 
 ### Basic Usage
 
-1. **Fetch context for current project:**
+1. **Sync instructions for active profile:**
    ```
-   Use MCP tool: fetch_and_setup_copilot_files
+   Use MCP tool: fetch_and_sync_instructions
    ```
 
-2. **Switch to development profile:**
+2. **Switch to corporate profile:**
    ```
    Use MCP tool: set_active_profile
-   project_type: "python"
-   profile_name: "dev"
+   profile_name: "corporate"
+   ```
+
+3. **List available profiles:**
+   ```
+   Use MCP tool: get_available_profiles
+   ```
+
+4. **View configuration:**
+   ```
+   Use MCP tool: list_context_config
    ```
 
 ### Advanced GitHub Integration
@@ -369,19 +349,19 @@ This fetches all matching files using GitHub's API with wildcard expansion.
 |----------|-------------|---------|
 | `GITHUB_TOKEN` | GitHub personal access token | None |
 | `CONTEXT_CONFIG_FILE` | Configuration file path | `context_config.yaml` |
-| `CONTEXT_WORKDIR` | Working directory | Current directory |
+| `INSTRUCTIONS_DIR` | Base directory for instructions | `~/vscode-instructions` |
 
 ## 🐛 Troubleshooting
 
-- **Profile not switching**: Check VS Code settings are updated correctly
-- **Context not loading**: Verify GitHub token for private repos
+- **Profile not switching**: Check that VS Code user settings are being updated correctly
+- **Instructions not loading**: Verify GitHub token for private repos and URL accessibility
 - **Network errors**: Check internet connection and URL accessibility
-- **Permission errors**: Ensure write access to `.github/` directory
+- **Permission errors**: Ensure write access to instructions directory (`~/vscode-instructions`)
 
 ## 📝 License
 
-MIT License - Feel free to extend and customize for your needs!
+MIT License - Feel free to extend and customize for your team's needs!
 
 ---
 
-*Arrr! This be a fine tool for any developer seeking to enhance their AI-assisted coding adventures! ⚓*
+*This tool helps teams maintain centralized, consistent AI instruction sets for better collaboration! 🚀*

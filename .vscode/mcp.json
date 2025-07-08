@@ -1,6 +1,9 @@
 {
+  // Instructions MCP Server - Manages centralized instruction files for GitHub Copilot
+  // IMPORTANT: After switching profiles with set_active_profile, start a NEW CHAT
+  // to use the new instructions effectively, or manually tell Copilot to ignore previous context
   "servers": {
-    "remote-context": {
+    "instructions-mcp": {
       "command": "uv",
       "args": [
         "run", 
@@ -11,7 +14,7 @@
       "env": {
         "GITHUB_TOKEN": "${input:githubToken}",
         "CONTEXT_CONFIG_FILE": "${input:configFile}",
-        "CONTEXT_WORKDIR": "${input:workDir}"
+        "INSTRUCTIONS_DIR": "${input:instructionsDir}"
       }
     }
   },
@@ -24,15 +27,15 @@
     },
     {
       "id": "configFile",
-      "description": "Context configuration file path or URL",
+      "description": "Context configuration file path or URL. After switching profiles, start a NEW CHAT for instructions to take effect.",
       "type": "promptString",
-      "default": "context_config.yaml"
+      "default": "https://gist.github.com/coley-angel/98bd62f772fdcbf95d84dfb1306a2263/raw/e52cdd5c07dfde21c39e23bbb3877a6c032478bf/gistfile1.yaml"
     },
     {
-      "id": "workDir",
-      "description": "Working directory for context operations",
+      "id": "instructionsDir",
+      "description": "Base directory for storing instruction files. Profile changes require NEW CHAT or manual context clearing.",
       "type": "promptString",
-      "default": "${workspaceFolder}"
+      "default": "~/vscode-instructions"
     }
   ]
 }
