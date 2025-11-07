@@ -739,33 +739,20 @@ class IDEManager:
         
         if merge:
             # Remove previously managed servers that are no longer in the profile
-            # CRITICAL: Only remove if the server still has the managed marker
+            # Check statefile instead of JSON marker (Windsurf may reject custom fields)
             servers_to_remove = previously_managed - new_managed_names
             for server_name in servers_to_remove:
                 if server_name in existing_servers:
-                    server_config = existing_servers[server_name]
-                    # ONLY remove if it currently has the managed marker
-                    # This protects servers where user manually removed the marker
-                    if isinstance(server_config, dict) and server_config.get(self.MANAGED_MARKER) == self.MANAGED_VALUE:
+                    # Check if it's still tracked in statefile
+                    if server_name in previously_managed:
                         logger.info(f"Removing managed server '{server_name}' (no longer in profile)")
                         existing_servers.pop(server_name)
-                    else:
-                        logger.info(
-                            f"Skipping removal of '{server_name}' - no longer has managed marker. "
-                            f"Server appears to have been manually modified."
-                        )
         else:
-            # Replace mode: remove ONLY previously managed servers that still have the marker
+            # Replace mode: remove ONLY previously managed servers (tracked in statefile)
             for server_name in previously_managed:
                 if server_name in existing_servers:
-                    server_config = existing_servers[server_name]
-                    # ONLY remove if it currently has the managed marker
-                    if isinstance(server_config, dict) and server_config.get(self.MANAGED_MARKER) == self.MANAGED_VALUE:
-                        existing_servers.pop(server_name)
-                    else:
-                        logger.info(
-                            f"Preserving '{server_name}' - no longer has managed marker"
-                        )
+                    logger.info(f"Removing previously managed server '{server_name}'")
+                    existing_servers.pop(server_name)
         
         # Add/update servers from profile
         new_managed_servers = {}
@@ -773,28 +760,50 @@ class IDEManager:
             if not server.enabled:
                 continue
             
-            # Check if server already exists and is manually configured
-            if server.name in existing_servers:
-                existing_config = existing_servers[server.name]
-                # If it exists without the managed marker, it's manually configured - skip it
-                if isinstance(existing_config, dict) and existing_config.get(self.MANAGED_MARKER) != self.MANAGED_VALUE:
-                    logger.warning(
-                        f"Skipping MCP server '{server.name}' - manually configured. "
-                        f"Remove it manually or add '{self.MANAGED_MARKER}: {self.MANAGED_VALUE}' to manage with team-config."
-                    )
-                    continue
+            # Check if server already exists and is NOT previously managed
+            # (if it exists but isn't in our statefile, it's manually configured)
+            if server.name in existing_servers and server.name not in previously_managed:
+                logger.warning(
+                    f"Skipping MCP server '{server.name}' - manually configured. "
+                    f"Remove it manually to manage with team-config."
+                )
+                continue
             
-            server_config = {
-                "command": server.command,
-                "args": server.args,
-                self.MANAGED_MARKER: self.MANAGED_VALUE,  # Mark as managed by team-config
-            }
+            # Windsurf MCP Configuration Schema
+            server_config = {}
             
-            if server.env:
-                server_config["env"] = server.env
+            # Command-based servers (stdio)
+            if server.command:
+                server_config["command"] = server.command
+                server_config["args"] = server.args if server.args else []
+                
+                # Environment variables - OPTIONAL
+                if server.env:
+                    server_config["env"] = server.env
+                
+                # Working directory - OPTIONAL
+                if server.cwd:
+                    server_config["cwd"] = server.cwd
             
-            if server.cwd:
-                server_config["cwd"] = server.cwd
+            # HTTP/SSE servers - use serverUrl field for Windsurf
+            elif server.url:
+                # Windsurf format: { "serverUrl": "https://..." }
+                server_config["serverUrl"] = server.url
+                
+                # Add headers if specified (may need to be in different format for Windsurf)
+                if server.headers:
+                    # Note: Windsurf may not support custom headers yet
+                    # Keep for future compatibility
+                    server_config["headers"] = server.headers
+                
+                # Add inputs if specified (for OAuth/tokens)
+                if server.inputs:
+                    server_config["inputs"] = server.inputs
+            
+            # Skip if neither command nor url
+            if not server_config:
+                logger.warning(f"Skipping server '{server.name}' - no command or serverUrl")
+                continue
             
             existing_servers[server.name] = server_config
             

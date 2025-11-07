@@ -1,0 +1,66 @@
+version: 1.0.0
+team_name: Ops Stack Team
+central_repo_url: https://github.com/CiscoOpsStack/Ops_Stack_Dev_Profiles
+central_repo_branch: main
+auto_update: true
+update_check_interval_minutes: 30
+global_security:
+  enabled: true
+  level: basic
+supported_ides:
+  - vscode
+  - cursor
+  - windsurf
+profiles:
+  default:
+    active: true
+    description: Ops Stack development profile with team policies
+    instructions: []
+    rules:
+      - repo: CiscoOpsStack/Ops_Stack_Dev_Profiles
+        paths:
+          - rules/windsurf_cascade_guidelines.md
+          - rules/code_quality_standards.md
+        token_env_var: GITHUB_TOKEN
+    workflows:
+      - repo: CiscoOpsStack/Ops_Stack_Dev_Profiles
+        paths:
+          - workflows/pull_request_workflow.md
+        token_env_var: GITHUB_TOKEN
+    prompts: []
+    mcp_servers:
+      awslabs.ccapi-mcp-server:
+        command: uvx awslabs.ccapi-mcp-server@latest
+        env:
+          AWS_PROFILE: awsaml-211726082939
+          AWS_REGION: us-gov-west-1
+          FASTMCP_LOG_LEVEL: ERROR
+        disabled: false
+        autoApprove: []
+        args: []
+      github:
+        type: http
+        url: https://api.githubcopilot.com/mcp/
+        headers:
+          Authorization: Bearer ${input:github_mcp_pat}
+        inputs:
+          - type: promptString
+            id: github_mcp_pat
+            description: GitHub Personal Access Token
+            password: true
+      awslabs.aws-diagram-mcp-server:
+        command: uvx awslabs.aws-diagram-mcp-server
+        env:
+          FASTMCP_LOG_LEVEL: ERROR
+        autoApprove: []
+        disabled: false
+        args: []
+      Atlassian-MCP-Server:
+        url: https://mcp.atlassian.com/v1/sse
+    security:
+      enabled: true
+      level: basic
+    tags:
+      - ops-stack
+      - aws
+      - infrastructure

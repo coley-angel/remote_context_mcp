@@ -63,15 +63,23 @@ class SecurityConfig:
 
 @dataclass
 class MCPServerConfig:
-    """Configuration for an MCP server"""
+    """Configuration for an MCP server - supports multiple formats"""
     name: str
-    command: str
+    command: Optional[str] = None  # Optional for HTTP-based servers
     args: List[str] = field(default_factory=list)
     env: Dict[str, str] = field(default_factory=dict)
     cwd: Optional[str] = None
     enabled: bool = True
     auto_restart: bool = True
     description: Optional[str] = None
+    
+    # IDE-native fields (Windsurf/VSCode/Cursor format)
+    type: Optional[str] = None  # "http", "sse", etc.
+    url: Optional[str] = None  # For HTTP/SSE servers
+    headers: Optional[Dict[str, str]] = None  # For auth headers
+    inputs: Optional[List[Dict[str, Any]]] = None  # For user prompts
+    disabled: Optional[bool] = None  # IDE uses 'disabled' instead of 'enabled'
+    autoApprove: Optional[List[str]] = None  # Tools to auto-approve
 
 
 @dataclass

@@ -33,9 +33,25 @@ class ConfigLoader:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f)
             
+            if data is None:
+                logger.error(f"Empty YAML file: {file_path}")
+                return None
+            
+            if not isinstance(data, dict):
+                logger.error(f"Invalid YAML structure - expected dictionary, got {type(data)}: {file_path}")
+                return None
+            
             return ConfigLoader.parse_config(data)
+        except yaml.YAMLError as e:
+            logger.error(f"YAML syntax error in {file_path}")
+            logger.error(f"  Error: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Failed to load config from {file_path}: {e}")
+            logger.error(f"Failed to load config from {file_path}")
+            logger.error(f"  Error type: {type(e).__name__}")
+            logger.error(f"  Error message: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
     
     @staticmethod
@@ -51,9 +67,29 @@ class ConfigLoader:
         """
         try:
             data = yaml.safe_load(yaml_content)
+            
+            if data is None:
+                logger.error("Empty or invalid YAML content")
+                return None
+            
+            if not isinstance(data, dict):
+                logger.error(f"Invalid YAML structure - expected dictionary, got {type(data)}")
+                return None
+            
             return ConfigLoader.parse_config(data)
+        except yaml.YAMLError as e:
+            logger.error(f"YAML syntax error in content")
+            logger.error(f"  Error: {e}")
+            # Show first few lines of content for debugging
+            lines = yaml_content.split('\n')[:5]
+            logger.error(f"  First lines of content:\n" + "\n".join(f"    {line}" for line in lines))
+            return None
         except Exception as e:
-            logger.error(f"Failed to parse config: {e}")
+            logger.error(f"Failed to parse config from string")
+            logger.error(f"  Error type: {type(e).__name__}")
+            logger.error(f"  Error message: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
     
     @staticmethod
@@ -108,10 +144,27 @@ class ConfigLoader:
         workflows = ConfigLoader._parse_remote_sources(data.get("workflows", []))
         prompts = ConfigLoader._parse_remote_sources(data.get("prompts", []))
         
-        # Parse MCP servers
+        # Parse MCP servers - support both list and dictionary formats
         mcp_servers = []
-        for server_data in data.get("mcp_servers", []):
-            mcp_servers.append(ConfigLoader._parse_mcp_server(server_data))
+        mcp_servers_data = data.get("mcp_servers", [])
+        
+        if isinstance(mcp_servers_data, dict):
+            # Dictionary format: {server_name: {config}}
+            for server_name, server_config in mcp_servers_data.items():
+                if isinstance(server_config, dict):
+                    server_config = server_config.copy()
+                    server_config["name"] = server_name
+                    try:
+                        mcp_servers.append(ConfigLoader._parse_mcp_server(server_config))
+                    except Exception as e:
+                        logger.warning(f"Failed to parse MCP server '{server_name}': {e}")
+        elif isinstance(mcp_servers_data, list):
+            # List format: [{name: server_name, ...}]
+            for server_data in mcp_servers_data:
+                try:
+                    mcp_servers.append(ConfigLoader._parse_mcp_server(server_data))
+                except Exception as e:
+                    logger.warning(f"Failed to parse MCP server: {e}")
         
         # Parse IDE overrides
         ide_overrides = {}
@@ -177,16 +230,53 @@ class ConfigLoader:
     
     @staticmethod
     def _parse_mcp_server(data: Dict[str, Any]) -> MCPServerConfig:
-        """Parse MCP server configuration"""
+        """
+        Parse MCP server configuration - supports multiple formats.
+        Handles both standard format and IDE-native formats (Windsurf/VSCode/Cursor).
+        """
+        if "name" not in data:
+            raise ValueError("MCP server configuration missing 'name' field")
+        
+        # Handle enabled/disabled field (IDEs use 'disabled', we use 'enabled')
+        enabled = True
+        if "disabled" in data:
+            enabled = not data["disabled"]
+        elif "enabled" in data:
+            enabled = data["enabled"]
+        
+        # Command is required for standard servers but optional for HTTP/SSE
+        command = data.get("command")
+        args = data.get("args", [])
+        server_type = data.get("type")
+        
+        # Parse command string if it contains spaces and no explicit args
+        # "uvx package@version" -> command="uvx", args=["package@version"]
+        if command and not args and ' ' in command:
+            parts = command.split(None, 1)  # Split on first whitespace
+            if len(parts) == 2:
+                command, arg = parts
+                args = [arg]
+                logger.debug(f"Split command '{data.get('command')}' into command='{command}' args={args}")
+        
+        if not command and not (server_type or data.get("url")):
+            logger.warning(f"MCP server '{data['name']}' has neither 'command' nor 'type/url'")
+        
         return MCPServerConfig(
             name=data["name"],
-            command=data["command"],
-            args=data.get("args", []),
+            command=command,
+            args=args,
             env=data.get("env", {}),
             cwd=data.get("cwd"),
-            enabled=data.get("enabled", True),
+            enabled=enabled,
             auto_restart=data.get("auto_restart", True),
             description=data.get("description"),
+            # IDE-native fields
+            type=server_type,
+            url=data.get("url"),
+            headers=data.get("headers"),
+            inputs=data.get("inputs"),
+            disabled=data.get("disabled"),
+            autoApprove=data.get("autoApprove"),
         )
     
     @staticmethod

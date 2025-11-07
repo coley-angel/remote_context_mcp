@@ -60,18 +60,31 @@ logger.info(f"  TEAM_CONFIG_BRANCH: {TEAM_CONFIG_BRANCH}")
 logger.info(f"  TEAM_CONFIG_FILE: {CONFIG_FILE}")
 logger.info(f"  GITHUB_TOKEN: {'***SET***' if GITHUB_TOKEN else 'NOT SET'}")
 logger.info(f"  Working Directory: {os.getcwd()}")
+logger.info(f"  Python: {sys.executable}")
+logger.info(f"  Script: {__file__}")
+
+# Debug: Log ALL environment variables for troubleshooting
+logger.debug("All environment variables:")
+for key in sorted(os.environ.keys()):
+    if any(x in key.upper() for x in ['TOKEN', 'CONFIG', 'GITHUB', 'TEAM']):
+        value = os.environ[key]
+        if 'TOKEN' in key.upper():
+            value = '***HIDDEN***' if value else 'NOT SET'
+        logger.debug(f"  {key}: {value}")
 logger.info("=" * 80)
 
 # Determine configuration source
 if TEAM_CONFIG_REPO:
-    # Build raw content URL from repository
+    # Build URL from repository
     repo_url = TEAM_CONFIG_REPO.rstrip('/').replace('.git', '')
     
     if "github.com" in repo_url:
-        # https://github.com/org/repo -> https://raw.githubusercontent.com/org/repo/branch/file
+        # Use GitHub API for private repos (works with token auth)
+        # https://github.com/org/repo -> https://api.github.com/repos/org/repo/contents/file?ref=branch
         parts = repo_url.split('github.com/')[-1]
-        CONFIG_FILE = f"https://raw.githubusercontent.com/{parts}/{TEAM_CONFIG_BRANCH}/{CONFIG_FILE}"
-        logger.info(f"Loading config from GitHub: {CONFIG_FILE}")
+        config_filename = CONFIG_FILE if not CONFIG_FILE.startswith('http') else 'team_config.yaml'
+        CONFIG_FILE = f"https://api.github.com/repos/{parts}/contents/{config_filename}?ref={TEAM_CONFIG_BRANCH}"
+        logger.info(f"Loading config from GitHub API: {CONFIG_FILE}")
     
     elif "gitlab.com" in repo_url:
         # https://gitlab.com/org/repo -> https://gitlab.com/org/repo/-/raw/branch/file
@@ -295,7 +308,7 @@ def get_ide_content_dir(ide_type: IDEType, profile_name: str) -> Path:
 
 
 def load_team_config() -> TeamConfig:
-    """Load team configuration from file or URL"""
+    """Load team configuration from file or URL with detailed error reporting"""
     global _current_config, BASE_DIR, CACHE_DIR, CONTENT_DIR, BACKUP_DIR
     
     config_source = CONFIG_FILE
@@ -303,37 +316,92 @@ def load_team_config() -> TeamConfig:
     try:
         if config_source.startswith(('http://', 'https://')):
             # Remote config file
+            logger.info(f"Loading remote config from: {config_source}")
             headers = {}
-            if GITHUB_TOKEN and "github.com" in config_source:
+            if GITHUB_TOKEN and "github" in config_source:
                 headers["Authorization"] = f"token {GITHUB_TOKEN}"
+                headers["Accept"] = "application/vnd.github.v3+json"
             
             with httpx.Client(follow_redirects=True) as client:
-                response = client.get(config_source, headers=headers, timeout=5.0)
+                response = client.get(config_source, headers=headers, timeout=10.0)
                 response.raise_for_status()
-                content = response.text
+                
+                # Handle GitHub API response (base64 encoded content)
+                if "api.github.com" in config_source:
+                    import base64
+                    response_json = response.json()
+                    content = base64.b64decode(response_json['content']).decode('utf-8')
+                    logger.info(f"Successfully fetched config from GitHub API ({len(content)} bytes)")
+                else:
+                    content = response.text
+                    logger.info(f"Successfully fetched config ({len(content)} bytes)")
+                
                 config = ConfigLoader.load_from_string(content)
+                
+                if not config:
+                    logger.error("⚠️  CONFIG PARSE ERROR: Failed to parse YAML content")
+                    logger.error("   Check for YAML syntax errors in your team_config.yaml")
+                    logger.error(f"   Source: {config_source}")
+                    return create_default_config()
         else:
             # Local config file
             config_path = Path(config_source)
+            logger.info(f"Loading local config from: {config_path}")
+            
             if config_path.exists():
+                logger.info(f"Config file found, parsing...")
                 config = ConfigLoader.load_from_file(config_path)
+                
+                if not config:
+                    logger.error("⚠️  CONFIG PARSE ERROR: Failed to parse local config file")
+                    logger.error(f"   File: {config_path}")
+                    logger.error("   Check for YAML syntax errors or missing required fields")
+                    return create_default_config()
             else:
                 # Create default config
+                logger.warning(f"⚠️  Config file not found: {config_path}")
+                logger.info("Creating default configuration...")
                 config = create_default_config()
                 ConfigLoader.save_to_file(config, config_path)
-                logger.info(f"Created default configuration at {config_path}")
+                logger.info(f"✓ Created default configuration at {config_path}")
         
         if config:
             _current_config = config
             # Reinitialize directories based on the loaded config's repo URL
             BASE_DIR, CACHE_DIR, CONTENT_DIR, BACKUP_DIR = get_base_directories(config)
-            logger.info(f"Using repo-specific directory: {BASE_DIR}")
+            
+            logger.info("✓ Configuration loaded successfully")
+            logger.info(f"  Team: {config.team_name}")
+            logger.info(f"  Profiles: {len(config.profiles)}")
+            logger.info(f"  Directory: {BASE_DIR}")
+            
+            # Log any profiles with MCP servers
+            for profile_name, profile in config.profiles.items():
+                if profile.mcp_servers:
+                    logger.info(f"  Profile '{profile_name}': {len(profile.mcp_servers)} MCP servers configured")
+            
             return config
         else:
+            logger.warning("⚠️  Config loaded but returned None, using default")
             return create_default_config()
             
+    except httpx.HTTPStatusError as e:
+        logger.error(f"⚠️  HTTP ERROR: Failed to fetch remote config")
+        logger.error(f"   URL: {config_source}")
+        logger.error(f"   Status: {e.response.status_code}")
+        logger.error(f"   Check your GITHUB_TOKEN and repository URL")
+        return create_default_config()
+    except httpx.RequestError as e:
+        logger.error(f"⚠️  NETWORK ERROR: Cannot reach config source")
+        logger.error(f"   URL: {config_source}")
+        logger.error(f"   Error: {e}")
+        return create_default_config()
     except Exception as e:
-        logger.error(f"Failed to load config from {config_source}: {e}")
+        logger.error(f"⚠️  UNEXPECTED ERROR loading config from {config_source}")
+        logger.error(f"   Error type: {type(e).__name__}")
+        logger.error(f"   Error message: {e}")
+        import traceback
+        logger.error(f"   Traceback:\n{traceback.format_exc()}")
         return create_default_config()
 
 
@@ -454,10 +522,10 @@ async def fetch_content_from_source(
 
 
 # ============================================================================
-# MCP TOOLS - New comprehensive tools for team configuration management
+# INTERNAL HELPER FUNCTIONS
+# These are NOT exposed as MCP tools - they're called by the consolidated tools
 # ============================================================================
 
-@mcp.tool()
 async def sync_team_config(
     profile_name: Optional[str] = None,
     force_update: bool = False,
@@ -504,7 +572,6 @@ async def sync_team_config(
     )
 
 
-@mcp.tool()
 async def cleanup_profile_rules(profile_name: Optional[str] = None) -> str:
     """
     Clean up rule files from IDEs for a specific profile.
@@ -557,7 +624,6 @@ async def cleanup_profile_rules(profile_name: Optional[str] = None) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 async def list_profiles() -> str:
     """
     List all available configuration profiles.
@@ -606,7 +672,6 @@ async def list_profiles() -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 async def set_active_profile(profile_name: str, auto_sync: bool = True) -> str:
     """
     Set the active configuration profile.
@@ -677,7 +742,6 @@ async def set_active_profile(profile_name: str, auto_sync: bool = True) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 async def check_for_updates() -> str:
     """
     Check if central repository has updates without pulling them.
@@ -775,7 +839,6 @@ async def validate_content_security(
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 async def update_mcp_servers(
     profile_name: Optional[str] = None,
     reload: bool = True
@@ -832,7 +895,6 @@ async def update_mcp_servers(
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 async def list_installed_ides() -> str:
     """
     Detect which IDEs are installed on this system.
@@ -881,7 +943,6 @@ async def list_installed_ides() -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 async def get_current_ide_info() -> str:
     """
     Get information about the currently active IDE.
@@ -928,7 +989,6 @@ async def get_current_ide_info() -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 async def set_ide(ide_name: str) -> str:
     """
     Explicitly set which IDE you're using.
@@ -974,7 +1034,6 @@ async def set_ide(ide_name: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 async def get_config() -> str:
     """
     Get the complete team configuration.
@@ -996,7 +1055,6 @@ async def get_config() -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 async def reload_config() -> str:
     """
     Reload configuration from source (file or URL).
@@ -1060,6 +1118,236 @@ async def clear_cache(cache_type: str = "all") -> str:
     except Exception as e:
         logger.error(f"Error clearing cache: {e}")
         return json.dumps({"success": False, "error": str(e)})
+
+
+# ============================================================================
+# EXPOSED MCP TOOLS - Only these 6 tools are exposed to clients
+# ============================================================================
+# Consolidated action-based tools (4):
+#   - profile()       -> list, activate, show, cleanup
+#   - sync()          -> full, check, reload  
+#   - ide()           -> info, list, set
+#   - mcp_servers()   -> update, list
+#
+# Standalone utility tools (2):
+#   - validate_content_security()
+#   - clear_cache()
+# ============================================================================
+
+@mcp.tool()
+async def profile(
+    action: str = "list",
+    profile_name: Optional[str] = None,
+    auto_sync: bool = True
+) -> str:
+    """
+    Profile management - unified tool for all profile operations.
+    
+    Actions:
+        list - List all available profiles with their configurations
+        activate - Set a profile as active and optionally sync
+        show - Show detailed configuration for current or specified profile
+        cleanup - Remove profile rules from IDEs
+    
+    Args:
+        action: Operation to perform (list, activate, show, cleanup)
+        profile_name: Profile name (required for activate/cleanup)
+        auto_sync: Auto-sync after activation (default: True)
+    
+    Examples:
+        profile(action="list")
+        profile(action="activate", profile_name="production", auto_sync=True)
+        profile(action="show")
+        profile(action="cleanup", profile_name="old-profile")
+    
+    Returns:
+        JSON response with operation results
+    """
+    if action == "list":
+        return await list_profiles()
+    elif action == "activate":
+        if not profile_name:
+            return json.dumps({
+                "success": False,
+                "error": "profile_name required for 'activate' action"
+            })
+        return await set_active_profile(profile_name, auto_sync)
+    elif action == "show":
+        return await get_config()
+    elif action == "cleanup":
+        return await cleanup_profile_rules(profile_name)
+    else:
+        return json.dumps({
+            "success": False,
+            "error": f"Unknown action: {action}",
+            "available_actions": ["list", "activate", "show", "cleanup"],
+            "usage": "profile(action='list') or profile(action='activate', profile_name='production')"
+        })
+
+
+@mcp.tool()
+async def sync(
+    action: str = "full",
+    profile_name: Optional[str] = None,
+    force_update: bool = False,
+    sync_to_ides: bool = True
+) -> str:
+    """
+    Synchronization operations - sync content from remote repositories.
+    
+    Actions:
+        full - Full sync from remote repository (fetch rules, workflows, etc.)
+        check - Check for updates without syncing
+        reload - Reload configuration from source
+    
+    Args:
+        action: Operation to perform (full, check, reload)
+        profile_name: Profile to sync (uses active if None)
+        force_update: Force update even if recently synced
+        sync_to_ides: Sync to IDE directories
+    
+    Examples:
+        sync(action="full")
+        sync(action="full", profile_name="production", force_update=True)
+        sync(action="check")
+        sync(action="reload")
+    
+    Returns:
+        JSON response with sync results
+    """
+    if action == "full":
+        return await sync_team_config(profile_name, force_update, sync_to_ides)
+    elif action == "check":
+        return await check_for_updates()
+    elif action == "reload":
+        return await reload_config()
+    else:
+        return json.dumps({
+            "success": False,
+            "error": f"Unknown action: {action}",
+            "available_actions": ["full", "check", "reload"],
+            "usage": "sync(action='full') or sync(action='check')"
+        })
+
+
+@mcp.tool()
+async def mcp_servers(
+    action: str = "update",
+    profile_name: Optional[str] = None,
+    reload: bool = True
+) -> str:
+    """
+    MCP server management - configure and list MCP servers.
+    
+    Actions:
+        update - Update MCP server configurations from profile
+        list - List configured MCP servers
+    
+    Args:
+        action: Operation to perform (update, list)
+        profile_name: Profile to use (uses active if None)
+        reload: Reload IDE after update
+    
+    Examples:
+        mcp_servers(action="list")
+        mcp_servers(action="update")
+        mcp_servers(action="update", profile_name="production")
+    
+    Returns:
+        JSON response with results
+    """
+    if action == "update":
+        return await update_mcp_servers(profile_name, reload)
+    elif action == "list":
+        try:
+            config = load_team_config()
+            
+            if profile_name:
+                if profile_name not in config.profiles:
+                    return json.dumps({
+                        "success": False,
+                        "error": f"Profile '{profile_name}' not found"
+                    })
+                prof = config.profiles[profile_name]
+            else:
+                active_profiles = [p for p in config.profiles.values() if p.active]
+                if not active_profiles:
+                    return json.dumps({"success": False, "error": "No active profile found"})
+                prof = active_profiles[0]
+            
+            servers_info = []
+            for server in prof.mcp_servers:
+                servers_info.append({
+                    "name": server.name,
+                    "enabled": server.enabled,
+                    "command": server.command if server.command else None,
+                    "url": server.url if server.url else None,
+                    "type": server.type if server.type else "stdio",
+                    "description": server.description
+                })
+            
+            return json.dumps({
+                "success": True,
+                "profile": prof.name,
+                "servers": servers_info,
+                "total": len(servers_info)
+            }, indent=2)
+        except Exception as e:
+            logger.error(f"Error listing MCP servers: {e}")
+            return json.dumps({"success": False, "error": str(e)})
+    else:
+        return json.dumps({
+            "success": False,
+            "error": f"Unknown action: {action}",
+            "available_actions": ["update", "list"],
+            "usage": "mcp_servers(action='list') or mcp_servers(action='update')"
+        })
+
+
+@mcp.tool()
+async def ide(
+    action: str = "info",
+    ide_name: Optional[str] = None
+) -> str:
+    """
+    IDE management - detect, list, and configure IDE.
+    
+    Actions:
+        info - Get current IDE information
+        list - List all installed IDEs
+        set - Set IDE explicitly
+    
+    Args:
+        action: Operation to perform (info, list, set)
+        ide_name: IDE name for 'set' action (vscode, cursor, windsurf)
+    
+    Examples:
+        ide(action="info")
+        ide(action="list")
+        ide(action="set", ide_name="windsurf")
+    
+    Returns:
+        JSON response with IDE information
+    """
+    if action == "info":
+        return await get_current_ide_info()
+    elif action == "list":
+        return await list_installed_ides()
+    elif action == "set":
+        if not ide_name:
+            return json.dumps({
+                "success": False,
+                "error": "ide_name required for 'set' action",
+                "available_ides": ["vscode", "cursor", "windsurf"]
+            })
+        return await set_ide(ide_name)
+    else:
+        return json.dumps({
+            "success": False,
+            "error": f"Unknown action: {action}",
+            "available_actions": ["info", "list", "set"],
+            "usage": "ide(action='info') or ide(action='set', ide_name='windsurf')"
+        })
 
 
 def main():

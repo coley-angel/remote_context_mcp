@@ -69,25 +69,40 @@ profiles:
 
 ## MCP Tools
 
-### Core Tools
+The server exposes **6 consolidated tools** with action-based interfaces:
 
-- **`sync_team_config`** - Sync profile content to IDEs
-- **`list_profiles`** - List all configuration profiles
-- **`set_active_profile`** - Switch active profile (auto-cleans previous)
-- **`cleanup_profile_rules`** - Manually cleanup rules for a profile
+### Profile Management: `profile()`
 
-### IDE Management
+Unified tool for all profile operations:
+- **`profile(action="list")`** - List all configuration profiles
+- **`profile(action="activate", profile_name="...")`** - Switch active profile (auto-cleans previous)
+- **`profile(action="show")`** - View current configuration
+- **`profile(action="cleanup", profile_name="...")`** - Manually cleanup rules for a profile
 
-- **`list_installed_ides`** - Detect installed IDEs
-- **`get_current_ide_info`** - Get current IDE information
-- **`set_ide`** - Manually set IDE if not detected
+### Synchronization: `sync()`
 
-### Configuration
+Sync configurations from remote repositories:
+- **`sync(action="full")`** - Full sync of profile content to IDEs
+- **`sync(action="check")`** - Check for updates without syncing
+- **`sync(action="reload")`** - Reload configuration from source
 
-- **`get_config`** - View current configuration
-- **`reload_config`** - Reload configuration from file
-- **`update_mcp_servers`** - Update MCP server configs (respects manual configs)
-- **`validate_content_security`** - Scan content for security issues
+### IDE Management: `ide()`
+
+Detect and configure IDE settings:
+- **`ide(action="info")`** - Get current IDE information
+- **`ide(action="list")`** - List all installed IDEs
+- **`ide(action="set", ide_name="...")`** - Manually set IDE (vscode, cursor, windsurf)
+
+### MCP Server Management: `mcp_servers()`
+
+Configure MCP servers per profile:
+- **`mcp_servers(action="list")`** - List configured MCP servers
+- **`mcp_servers(action="update")`** - Update MCP server configs (respects manual configs)
+
+### Utility Tools
+
+- **`validate_content_security(content, content_type, filename)`** - Scan content for security issues
+- **`clear_cache(cache_type="all")`** - Clear cached repositories and content
 
 ### MCP Server Management
 
@@ -260,15 +275,12 @@ The server automatically detects installed IDEs. If your IDE isn't detected:
 
 2. **Sync to your IDE**:
    ```
-   Use MCP tool: sync_team_config
-   profile_name: dev
+   Use MCP tool: sync(action="full", profile_name="dev")
    ```
 
 3. **Switch profiles** (auto-cleans old rules):
    ```
-   Use MCP tool: set_active_profile
-   profile_name: production
-   auto_sync: true
+   Use MCP tool: profile(action="activate", profile_name="production", auto_sync=True)
    ```
 
 ## Contributing
