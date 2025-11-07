@@ -23,7 +23,6 @@ import yaml
 import httpx
 import aiofiles
 import fnmatch
-from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 # Import new modules
@@ -41,18 +40,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
-
 # Initialize FastMCP
 mcp = FastMCP("TeamConfigMCP")
 
-# Configuration
+# Configuration - read from environment variables (passed via mcp_config.json)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 TEAM_CONFIG_REPO = os.getenv("TEAM_CONFIG_REPO")
 TEAM_CONFIG_BRANCH = os.getenv("TEAM_CONFIG_BRANCH", "main")
 CONFIG_FILE = os.getenv("TEAM_CONFIG_FILE", "team_config.yaml")
 WORKSPACE_DIR = Path(os.getenv("WORKSPACE_DIR", os.getcwd()))
+
+# Log environment variable status (to stderr for debugging)
+logger.info("=" * 80)
+logger.info("Team Config MCP Server Starting")
+logger.info("=" * 80)
+logger.info(f"Environment variables:")
+logger.info(f"  TEAM_CONFIG_REPO: {TEAM_CONFIG_REPO or 'NOT SET'}")
+logger.info(f"  TEAM_CONFIG_BRANCH: {TEAM_CONFIG_BRANCH}")
+logger.info(f"  TEAM_CONFIG_FILE: {CONFIG_FILE}")
+logger.info(f"  GITHUB_TOKEN: {'***SET***' if GITHUB_TOKEN else 'NOT SET'}")
+logger.info(f"  Working Directory: {os.getcwd()}")
+logger.info("=" * 80)
 
 # Determine configuration source
 if TEAM_CONFIG_REPO:
