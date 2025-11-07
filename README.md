@@ -11,6 +11,7 @@ A Model Context Protocol (MCP) server for managing team-wide configuration inclu
 - **🌐 Remote Content**: Fetch content from GitHub repositories and URLs
 - **🛠️ MCP Server Management**: Configure and manage MCP servers per profile
 - **🧹 Auto Cleanup**: Removes rules when profiles are deactivated
+- **🎯 Smart Workspace Detection**: Automatically finds the correct workspace root for .windsurf/, .cursor/, .vscode/ directories
 
 ## Installation
 
@@ -77,7 +78,8 @@ Unified tool for all profile operations:
 - **`profile(action="list")`** - List all configuration profiles
 - **`profile(action="activate", profile_name="...")`** - Switch active profile (auto-cleans previous)
 - **`profile(action="show")`** - View current configuration
-- **`profile(action="cleanup", profile_name="...")`** - Manually cleanup rules for a profile
+- **`profile(action="cleanup", profile_name="...")`** - Remove rules/workflows only
+- **`profile(action="deactivate", profile_name="...")`** - **Fully deactivate** (removes MCP servers, rules, workflows, prompts)
 
 ### Synchronization: `sync()`
 
@@ -298,6 +300,9 @@ MIT License - See LICENSE file for details
 ---
 
 **Documentation**:
+- [Workspace Detection](WORKSPACE_DETECTION.md) - Dynamic workspace root detection
+- [Deactivate Feature](DEACTIVATE_FEATURE.md) - Complete profile deactivation
+- [Consolidation Changes](CONSOLIDATION_CHANGES.md) - Tool consolidation details
 - [Migration Guide](docs/MIGRATION.md)
 - [IDE Detection](docs/IDE_DETECTION.md)
 - [Tracking System](docs/TRACKING_SYSTEM.md)

@@ -48,7 +48,8 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 TEAM_CONFIG_REPO = os.getenv("TEAM_CONFIG_REPO")
 TEAM_CONFIG_BRANCH = os.getenv("TEAM_CONFIG_BRANCH", "main")
 CONFIG_FILE = os.getenv("TEAM_CONFIG_FILE", "team_config.yaml")
-WORKSPACE_DIR = Path(os.getenv("WORKSPACE_DIR", os.getcwd()))
+# WORKSPACE_DIR will be detected dynamically - see get_workspace_dir()
+WORKSPACE_DIR = None  # Populated dynamically
 
 # Log environment variable status (to stderr for debugging)
 logger.info("=" * 80)
@@ -283,6 +284,99 @@ def set_current_ide(ide_type: IDEType):
     """
     global _current_ide
     _current_ide = ide_type
+
+
+def detect_workspace_root(ide_type: Optional[IDEType] = None, start_path: Optional[Path] = None) -> Optional[Path]:
+    """
+    Dynamically detect the workspace root directory by looking for IDE-specific markers.
+    
+    Searches for:
+    - .windsurf/ directory (Windsurf)
+    - .cursor/ directory (Cursor)
+    - .vscode/ directory (VS Code)
+    - .git/ directory (fallback)
+    
+    Args:
+        ide_type: IDE type to search for (searches all if None)
+        start_path: Starting path to search from (uses cwd if None)
+    
+    Returns:
+        Path to workspace root, or None if not found
+    """
+    if start_path is None:
+        start_path = Path.cwd()
+    else:
+        start_path = Path(start_path)
+    
+    # IDE-specific directory markers
+    ide_markers = {
+        IDEType.WINDSURF: ['.windsurf'],
+        IDEType.CURSOR: ['.cursor'],
+        IDEType.VSCODE: ['.vscode']
+    }
+    
+    # Build list of markers to search for
+    markers_to_search = []
+    if ide_type:
+        markers_to_search = ide_markers.get(ide_type, [])
+    else:
+        # Search for all IDE markers
+        for markers in ide_markers.values():
+            markers_to_search.extend(markers)
+    
+    # Add common markers
+    markers_to_search.append('.git')
+    
+    # Walk up the directory tree
+    current = start_path.resolve()
+    
+    # Limit search depth to prevent infinite loops
+    max_depth = 10
+    depth = 0
+    
+    while current != current.parent and depth < max_depth:
+        # Check for any marker directory
+        for marker in markers_to_search:
+            marker_path = current / marker
+            if marker_path.exists() and marker_path.is_dir():
+                logger.info(f"Found workspace root at {current} (marker: {marker})")
+                return current
+        
+        current = current.parent
+        depth += 1
+    
+    # No workspace root found
+    logger.warning(f"Could not detect workspace root from {start_path}")
+    return None
+
+
+def get_workspace_dir(ide_type: Optional[IDEType] = None) -> Path:
+    """
+    Get the workspace directory, attempting dynamic detection first.
+    
+    Args:
+        ide_type: IDE type for targeted detection
+    
+    Returns:
+        Path to workspace directory
+    """
+    # Try environment variable first
+    env_workspace = os.getenv("WORKSPACE_DIR")
+    if env_workspace:
+        workspace = Path(env_workspace)
+        if workspace.exists():
+            logger.info(f"Using workspace from WORKSPACE_DIR: {workspace}")
+            return workspace
+    
+    # Try dynamic detection
+    detected = detect_workspace_root(ide_type)
+    if detected:
+        return detected
+    
+    # Fallback to current working directory
+    fallback = Path.cwd()
+    logger.warning(f"Using fallback workspace: {fallback}")
+    return fallback
 
 
 def get_ide_content_dir(ide_type: IDEType, profile_name: str) -> Path:
@@ -559,6 +653,7 @@ async def sync_team_config(
     config = load_team_config()
     ide_manager = get_ide_manager()
     current_ide = get_current_ide()
+    workspace_dir = get_workspace_dir(current_ide) if sync_to_ides else None
     
     return await sync_profile_tool(
         profile_name,
@@ -566,7 +661,7 @@ async def sync_team_config(
         CONTENT_DIR,
         ide_manager,
         fetch_content_from_source,
-        WORKSPACE_DIR if sync_to_ides else None,
+        workspace_dir,
         current_ide,
         get_ide_content_dir
     )
@@ -588,6 +683,8 @@ async def cleanup_profile_rules(profile_name: Optional[str] = None) -> str:
     try:
         config = load_team_config()
         ide_manager = get_ide_manager()
+        current_ide = get_current_ide()
+        workspace_dir = get_workspace_dir(current_ide)
         
         # Find profile
         if profile_name is None:
@@ -609,7 +706,7 @@ async def cleanup_profile_rules(profile_name: Optional[str] = None) -> str:
         # Cleanup rules from all IDEs
         cleanup_results = ide_manager.cleanup_all_ides(
             profile_name,
-            WORKSPACE_DIR
+            workspace_dir
         )
         
         return json.dumps({
@@ -621,6 +718,111 @@ async def cleanup_profile_rules(profile_name: Optional[str] = None) -> str:
         
     except Exception as e:
         logger.error(f"Error cleaning up profile rules: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+async def deactivate_profile(profile_name: Optional[str] = None) -> str:
+    """
+    Fully deactivate a profile by removing all its managed content and MCP servers.
+    
+    This performs a complete cleanup:
+    - Removes MCP servers managed by the profile
+    - Cleans up rules, workflows, prompts from all IDEs
+    - Clears tracking statefiles
+    - Sets profile as inactive (if local config)
+    
+    Args:
+        profile_name: Profile name to deactivate (uses active profile if None)
+    
+    Returns:
+        JSON response with deactivation results
+    """
+    try:
+        config = load_team_config()
+        ide_manager = get_ide_manager()
+        current_ide = get_current_ide()
+        workspace_dir = get_workspace_dir(current_ide)
+        
+        # Find profile
+        if profile_name is None:
+            active_profiles = [p for p in config.profiles.values() if p.active]
+            if not active_profiles:
+                return json.dumps({
+                    "success": False,
+                    "error": "No active profile found"
+                })
+            profile_name = active_profiles[0].name
+        else:
+            if profile_name not in config.profiles:
+                return json.dumps({
+                    "success": False,
+                    "error": f"Profile '{profile_name}' not found",
+                    "available_profiles": list(config.profiles.keys())
+                })
+        
+        profile = config.profiles[profile_name]
+        results = {}
+        
+        # Step 1: Remove MCP servers managed by this profile
+        logger.info(f"Removing MCP servers for profile '{profile_name}'")
+        mcp_removal_results = {}
+        
+        for ide_type in config.supported_ides:
+            try:
+                # Windsurf uses global config, others use workspace-specific
+                workspace = None if ide_type == IDEType.WINDSURF else workspace_dir
+                
+                # Clear the managed servers for this profile by updating with empty list
+                success = ide_manager.update_mcp_servers(
+                    ide_type,
+                    [],  # Empty list to remove all managed servers
+                    workspace,
+                    merge=True,
+                    profile_name=profile_name
+                )
+                mcp_removal_results[ide_type.value] = success
+            except Exception as e:
+                logger.error(f"Error removing MCP servers from {ide_type.value}: {e}")
+                mcp_removal_results[ide_type.value] = False
+        
+        results["mcp_servers_removed"] = mcp_removal_results
+        
+        # Step 2: Cleanup rules, workflows, prompts
+        logger.info(f"Cleaning up content for profile '{profile_name}'")
+        cleanup_results = ide_manager.cleanup_all_ides(
+            profile_name,
+            workspace_dir
+        )
+        results["content_cleaned"] = {ide.value: success for ide, success in cleanup_results.items()}
+        
+        # Step 3: Mark profile as inactive (if local config)
+        if not CONFIG_FILE.startswith(('http://', 'https://')):
+            try:
+                profile.active = False
+                config_path = Path(CONFIG_FILE)
+                ConfigLoader.save_to_file(config, config_path)
+                results["profile_marked_inactive"] = True
+            except Exception as e:
+                logger.warning(f"Could not mark profile as inactive: {e}")
+                results["profile_marked_inactive"] = False
+        else:
+            results["profile_marked_inactive"] = "skipped (remote config)"
+        
+        return json.dumps({
+            "success": True,
+            "profile": profile_name,
+            "results": results,
+            "message": f"Profile '{profile_name}' fully deactivated",
+            "details": {
+                "mcp_servers_count": len(profile.mcp_servers),
+                "rules_sources": len(profile.rules),
+                "workflows_sources": len(profile.workflows),
+                "prompts_sources": len(profile.prompts)
+            }
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error deactivating profile: {e}")
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -705,9 +907,11 @@ async def set_active_profile(profile_name: str, auto_sync: bool = True) -> str:
         cleanup_results = {}
         if previously_active and previously_active != profile_name:
             logger.info(f"Cleaning up rules from previous profile: {previously_active}")
+            current_ide = get_current_ide()
+            workspace_dir = get_workspace_dir(current_ide)
             cleanup_results = ide_manager.cleanup_all_ides(
                 previously_active,
-                WORKSPACE_DIR
+                workspace_dir
             )
         
         # Deactivate all profiles
@@ -858,6 +1062,8 @@ async def update_mcp_servers(
     try:
         config = load_team_config()
         ide_manager = get_ide_manager()
+        current_ide = get_current_ide()
+        workspace_dir = get_workspace_dir(current_ide)
         
         # Find profile
         if profile_name is None:
@@ -873,10 +1079,12 @@ async def update_mcp_servers(
         # Update MCP servers for all IDEs
         results = {}
         for ide_type in config.supported_ides:
+            # Windsurf uses global config, others use workspace-specific
+            workspace = None if ide_type == IDEType.WINDSURF else workspace_dir
             success = ide_manager.update_mcp_servers(
                 ide_type,
                 profile.mcp_servers,
-                WORKSPACE_DIR,
+                workspace,
                 merge=True,  # Merge with existing servers, preserve manually configured ones
                 profile_name=profile.name  # Track which profile manages these servers
             )
@@ -914,11 +1122,14 @@ async def list_installed_ides() -> str:
         # Get current IDE
         current_ide = get_current_ide()
         detected_ide = detect_current_ide()
+        workspace_dir = get_workspace_dir(current_ide)
         
         ide_info = {}
         for ide_type in installed:
             settings_path = ide_manager.get_settings_path(ide_type)
-            mcp_path = ide_manager.get_mcp_config_path(ide_type, WORKSPACE_DIR)
+            # Windsurf uses global config
+            workspace = None if ide_type == IDEType.WINDSURF else workspace_dir
+            mcp_path = ide_manager.get_mcp_config_path(ide_type, workspace)
             
             ide_info[ide_type.value] = {
                 "installed": True,
@@ -1124,7 +1335,7 @@ async def clear_cache(cache_type: str = "all") -> str:
 # EXPOSED MCP TOOLS - Only these 6 tools are exposed to clients
 # ============================================================================
 # Consolidated action-based tools (4):
-#   - profile()       -> list, activate, show, cleanup
+#   - profile()       -> list, activate, show, cleanup, deactivate
 #   - sync()          -> full, check, reload  
 #   - ide()           -> info, list, set
 #   - mcp_servers()   -> update, list
@@ -1147,11 +1358,12 @@ async def profile(
         list - List all available profiles with their configurations
         activate - Set a profile as active and optionally sync
         show - Show detailed configuration for current or specified profile
-        cleanup - Remove profile rules from IDEs
+        cleanup - Remove profile rules from IDEs (rules/workflows only)
+        deactivate - Fully deactivate profile (removes MCP servers, rules, workflows, prompts)
     
     Args:
-        action: Operation to perform (list, activate, show, cleanup)
-        profile_name: Profile name (required for activate/cleanup)
+        action: Operation to perform (list, activate, show, cleanup, deactivate)
+        profile_name: Profile name (required for activate/cleanup/deactivate)
         auto_sync: Auto-sync after activation (default: True)
     
     Examples:
@@ -1159,6 +1371,7 @@ async def profile(
         profile(action="activate", profile_name="production", auto_sync=True)
         profile(action="show")
         profile(action="cleanup", profile_name="old-profile")
+        profile(action="deactivate", profile_name="default")
     
     Returns:
         JSON response with operation results
@@ -1176,12 +1389,14 @@ async def profile(
         return await get_config()
     elif action == "cleanup":
         return await cleanup_profile_rules(profile_name)
+    elif action == "deactivate":
+        return await deactivate_profile(profile_name)
     else:
         return json.dumps({
             "success": False,
             "error": f"Unknown action: {action}",
-            "available_actions": ["list", "activate", "show", "cleanup"],
-            "usage": "profile(action='list') or profile(action='activate', profile_name='production')"
+            "available_actions": ["list", "activate", "show", "cleanup", "deactivate"],
+            "usage": "profile(action='list') or profile(action='deactivate', profile_name='default')"
         })
 
 
@@ -1358,7 +1573,14 @@ def main():
     logger.info(f"Config file: {CONFIG_FILE}")
     logger.info(f"Base directory: {BASE_DIR}")
     logger.info(f"Content directory: {CONTENT_DIR}")
-    logger.info(f"Workspace directory: {WORKSPACE_DIR}")
+    
+    # Detect workspace dynamically
+    detected_ide = detect_current_ide()
+    detected_workspace = detect_workspace_root(detected_ide)
+    if detected_workspace:
+        logger.info(f"Detected workspace: {detected_workspace}")
+    else:
+        logger.info(f"Workspace: Will be detected per-request (dynamic)")
     
     # Try to load configuration (don't block on failure)
     try:
