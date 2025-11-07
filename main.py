@@ -493,15 +493,28 @@ def load_team_config() -> TeamConfig:
             # Reinitialize directories based on the loaded config's repo URL
             BASE_DIR, CACHE_DIR, CONTENT_DIR, BACKUP_DIR = get_base_directories(config)
             
+            logger.info("="*80)
             logger.info("✓ Configuration loaded successfully")
+            logger.info(f"  Source: {config_source}")
             logger.info(f"  Team: {config.team_name}")
             logger.info(f"  Profiles: {len(config.profiles)}")
             logger.info(f"  Directory: {BASE_DIR}")
             
+            # Verify this is not the default fallback config
+            if config.team_name == "default_fallback":
+                logger.warning("⚠️  ATTENTION: Using fallback default configuration!")
+                logger.warning("   This means the GitHub config could not be loaded.")
+            
             # Log any profiles with MCP servers
             for profile_name, profile in config.profiles.items():
+                logger.info(f"  Profile '{profile_name}': Active={profile.active}")
                 if profile.mcp_servers:
-                    logger.info(f"  Profile '{profile_name}': {len(profile.mcp_servers)} MCP servers configured")
+                    logger.info(f"    - {len(profile.mcp_servers)} MCP servers configured")
+                if profile.rules:
+                    logger.info(f"    - {len(profile.rules)} rule sources configured")
+                if profile.workflows:
+                    logger.info(f"    - {len(profile.workflows)} workflow sources configured")
+            logger.info("="*80)
             
             return config
         else:
@@ -512,12 +525,31 @@ def load_team_config() -> TeamConfig:
         logger.error(f"⚠️  HTTP ERROR: Failed to fetch remote config")
         logger.error(f"   URL: {config_source}")
         logger.error(f"   Status: {e.response.status_code}")
-        logger.error(f"   Check your GITHUB_TOKEN and repository URL")
+        if e.response.status_code == 401:
+            logger.error(f"   Authentication failed - check your GITHUB_TOKEN")
+            logger.error(f"   Token is {'SET' if GITHUB_TOKEN else 'NOT SET'}")
+        elif e.response.status_code == 404:
+            logger.error(f"   Config file not found in repository")
+            logger.error(f"   Repository: {TEAM_CONFIG_REPO}")
+            logger.error(f"   Branch: {TEAM_CONFIG_BRANCH}")
+            logger.error(f"   File: {os.getenv('TEAM_CONFIG_FILE', 'team_config.yaml')}")
+        logger.error(f"   Response: {e.response.text[:200]}...")
+        
+        # If TEAM_CONFIG_REPO is set, don't fall back to default - fail clearly
+        if TEAM_CONFIG_REPO:
+            logger.error("❌ TEAM_CONFIG_REPO is set but cannot fetch config from GitHub")
+            logger.error("   Please fix the GitHub configuration or unset TEAM_CONFIG_REPO")
+            logger.error("   Using default config as fallback...")
         return create_default_config()
     except httpx.RequestError as e:
         logger.error(f"⚠️  NETWORK ERROR: Cannot reach config source")
         logger.error(f"   URL: {config_source}")
         logger.error(f"   Error: {e}")
+        
+        if TEAM_CONFIG_REPO:
+            logger.error("❌ TEAM_CONFIG_REPO is set but cannot connect to GitHub")
+            logger.error("   Check your network connection")
+            logger.error("   Using default config as fallback...")
         return create_default_config()
     except Exception as e:
         logger.error(f"⚠️  UNEXPECTED ERROR loading config from {config_source}")
@@ -525,6 +557,10 @@ def load_team_config() -> TeamConfig:
         logger.error(f"   Error message: {e}")
         import traceback
         logger.error(f"   Traceback:\n{traceback.format_exc()}")
+        
+        if TEAM_CONFIG_REPO:
+            logger.error("❌ TEAM_CONFIG_REPO is set but config loading failed")
+            logger.error("   Using default config as fallback...")
         return create_default_config()
 
 
@@ -532,10 +568,19 @@ def create_default_config() -> TeamConfig:
     """Create a default team configuration"""
     from schemas import Profile, SecurityConfig, SecurityLevel
     
+    logger.warning("="*80)
+    logger.warning("⚠️  USING DEFAULT CONFIGURATION")
+    logger.warning("="*80)
+    logger.warning("This is a fallback configuration with no profiles or content.")
+    if TEAM_CONFIG_REPO:
+        logger.warning(f"Expected to load from: {TEAM_CONFIG_REPO}")
+        logger.warning(f"But encountered an error. See above for details.")
+    logger.warning("="*80)
+    
     default_profile = Profile(
         name="default",
         active=True,
-        description="Default profile",
+        description="Default profile - no content configured",
         instructions=[],
         rules=[],
         workflows=[],
@@ -549,7 +594,7 @@ def create_default_config() -> TeamConfig:
     
     return TeamConfig(
         version="1.0.0",
-        team_name="default",
+        team_name="default_fallback",
         profiles={"default": default_profile},
         global_security=SecurityConfig(enabled=True, level=SecurityLevel.BASIC),
         supported_ides=[IDEType.VSCODE, IDEType.CURSOR, IDEType.WINDSURF],
@@ -1696,6 +1741,182 @@ async def ide(
             "available_actions": ["info", "list", "set"],
             "usage": "ide(action='info') or ide(action='set', ide_name='windsurf')"
         })
+
+
+@mcp.tool()
+async def validate_content_security(
+    content: str,
+    content_type: str = "general",
+    filename: str = "unknown"
+) -> str:
+    """
+    Validate content for security issues before using it.
+    
+    Scans for:
+    - Secrets (API keys, tokens, passwords)
+    - PII (emails, SSNs, phone numbers)
+    - Forbidden patterns
+    - Dangerous code patterns
+    
+    Args:
+        content: Content to validate
+        content_type: Type of content (instruction, rule, workflow, prompt, general)
+        filename: Name of file being validated
+    
+    Returns:
+        JSON response with validation results and violations
+    """
+    try:
+        validator = get_security_validator()
+        is_valid, violations, severity = validator.validate_content(
+            content,
+            content_type,
+            filename
+        )
+        
+        return json.dumps({
+            "success": True,
+            "valid": is_valid,
+            "violations": violations,
+            "severity": severity,
+            "filename": filename,
+            "content_type": content_type
+        }, indent=2)
+    except Exception as e:
+        logger.error(f"Error validating content: {e}")
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        })
+
+
+@mcp.tool()
+async def clear_cache(cache_type: str = "all") -> str:
+    """
+    Clear cached data.
+    
+    Args:
+        cache_type: Type of cache to clear (all, repos, content)
+    
+    Returns:
+        JSON response indicating what was cleared
+    """
+    try:
+        repo_manager = get_repo_manager()
+        
+        if cache_type in ["all", "repos"]:
+            # Clear repo cache
+            if CACHE_DIR and CACHE_DIR.exists():
+                import shutil
+                shutil.rmtree(CACHE_DIR)
+                CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Cleared repository cache: {CACHE_DIR}")
+        
+        if cache_type in ["all", "content"]:
+            # Clear content cache
+            if CONTENT_DIR and CONTENT_DIR.exists():
+                import shutil
+                shutil.rmtree(CONTENT_DIR)
+                CONTENT_DIR.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Cleared content cache: {CONTENT_DIR}")
+        
+        return json.dumps({
+            "success": True,
+            "cleared": cache_type,
+            "message": f"Cache '{cache_type}' cleared successfully"
+        })
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}")
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        })
+
+
+@mcp.tool()
+async def diagnose_config() -> str:
+    """
+    Diagnostic tool to check configuration loading and GitHub connection.
+    
+    Returns:
+        JSON response with diagnostic information
+    """
+    try:
+        diagnostics = {
+            "environment": {
+                "TEAM_CONFIG_REPO": TEAM_CONFIG_REPO or "NOT SET",
+                "TEAM_CONFIG_BRANCH": TEAM_CONFIG_BRANCH,
+                "TEAM_CONFIG_FILE": os.getenv('TEAM_CONFIG_FILE', 'team_config.yaml'),
+                "GITHUB_TOKEN": "SET" if GITHUB_TOKEN else "NOT SET",
+                "CONFIG_SOURCE": CONFIG_FILE
+            },
+            "current_config": {},
+            "github_test": {},
+            "recommendations": []
+        }
+        
+        # Test current config
+        config = load_team_config()
+        diagnostics["current_config"] = {
+            "team_name": config.team_name,
+            "is_default_fallback": config.team_name == "default_fallback",
+            "profiles": list(config.profiles.keys()),
+            "active_profile": next((p.name for p in config.profiles.values() if p.active), None)
+        }
+        
+        # Test GitHub connection if TEAM_CONFIG_REPO is set
+        if TEAM_CONFIG_REPO:
+            try:
+                headers = {}
+                if GITHUB_TOKEN and "github" in CONFIG_FILE:
+                    headers["Authorization"] = f"token {GITHUB_TOKEN}"
+                    headers["Accept"] = "application/vnd.github.v3+json"
+                
+                with httpx.Client(follow_redirects=True) as client:
+                    response = client.get(CONFIG_FILE, headers=headers, timeout=10.0)
+                    
+                    diagnostics["github_test"] = {
+                        "success": response.status_code == 200,
+                        "status_code": response.status_code,
+                        "url": CONFIG_FILE,
+                        "content_length": len(response.content) if response.status_code == 200 else 0
+                    }
+                    
+                    if response.status_code != 200:
+                        diagnostics["github_test"]["error"] = response.text[:200]
+            except Exception as e:
+                diagnostics["github_test"] = {
+                    "success": False,
+                    "error": str(e)
+                }
+        
+        # Generate recommendations
+        if config.team_name == "default_fallback":
+            diagnostics["recommendations"].append("⚠️  Using fallback config - GitHub config not loaded")
+        
+        if TEAM_CONFIG_REPO and not GITHUB_TOKEN:
+            diagnostics["recommendations"].append("⚠️  GITHUB_TOKEN not set - may fail for private repos")
+        
+        if TEAM_CONFIG_REPO and diagnostics.get("github_test", {}).get("status_code") == 404:
+            diagnostics["recommendations"].append(f"❌ Config file not found: {os.getenv('TEAM_CONFIG_FILE', 'team_config.yaml')}")
+            diagnostics["recommendations"].append(f"   Check that the file exists in branch '{TEAM_CONFIG_BRANCH}'")
+        
+        if TEAM_CONFIG_REPO and diagnostics.get("github_test", {}).get("status_code") == 401:
+            diagnostics["recommendations"].append("❌ Authentication failed - check GITHUB_TOKEN")
+        
+        if not TEAM_CONFIG_REPO:
+            diagnostics["recommendations"].append("ℹ️  TEAM_CONFIG_REPO not set - using local config")
+        
+        return json.dumps(diagnostics, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error in diagnostics: {e}")
+        import traceback
+        return json.dumps({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }, indent=2)
 
 
 def main():

@@ -119,6 +119,7 @@ Configure MCP servers per profile:
 
 - **`validate_content_security(content, content_type, filename)`** - Scan content for security issues
 - **`clear_cache(cache_type="all")`** - Clear cached repositories and content
+- **`diagnose_config()`** - **NEW** - Diagnostic tool to check GitHub config loading and connection status
 
 ### MCP Server Management
 
@@ -276,6 +277,32 @@ The server automatically detects installed IDEs. If your IDE isn't detected:
 1. The server will prompt you to specify which IDE you're using
 2. Or manually set via `set_ide` MCP tool
 3. Only the IDE you're using will have configurations installed
+
+## Troubleshooting GitHub Config
+
+If the MCP server is using a default fallback config instead of your GitHub config:
+
+1. **Run diagnostics**:
+   ```
+   Use MCP tool: diagnose_config()
+   ```
+   
+   This will show:
+   - Environment variables status
+   - Current config being used
+   - GitHub connection test results
+   - Specific recommendations
+
+2. **Common issues**:
+   - **404 Error**: Config file doesn't exist in the specified branch
+   - **401 Error**: GITHUB_TOKEN invalid or not set for private repos
+   - **Network Error**: Cannot reach GitHub (check internet connection)
+   - **Parse Error**: YAML syntax error in team_config.yaml
+
+3. **Check the logs**:
+   - The MCP server logs to stderr
+   - Look for warnings about using "default_fallback" config
+   - Errors will clearly indicate what went wrong
 
 ## Workflow Example
 
