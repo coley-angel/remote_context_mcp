@@ -15,3 +15,26 @@ dependencies = [
 
 [project.scripts]
 mcp-team-config = "main:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = [
+    "main",
+    "config_loader",
+    "content_tracker",
+    "frontmatter_utils",
+    "ide_adapter",
+    "ide_manager",
+    "mcp_tools",
+    "mcp_tools_consolidated",
+    "repo_manager",
+    "schemas",
+    "security_validator"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests*", "docs*", "rules*", "workflows*", "*.egg-info"]
