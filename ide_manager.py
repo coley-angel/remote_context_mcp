@@ -56,7 +56,13 @@ class IDEManager:
             defaults.update(ide_configs)
             self.ide_configs_by_name = defaults
         
-        self.state_dir = state_dir or Path.home() / ".mcp-team-config" / "state"
+        # If no state_dir provided, derive from MCP_BASE_DIR_ROOT
+        if state_dir is None:
+            base_root = Path(os.getenv("MCP_BASE_DIR_ROOT", "~/.mcp-team-config")).expanduser()
+            # Use a common state directory under the root for all repos
+            self.state_dir = base_root / "state"
+        else:
+            self.state_dir = state_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
     
     def _getIdeConfig(self, ideType: IDEType) -> IDEConfig:

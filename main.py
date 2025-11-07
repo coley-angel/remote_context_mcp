@@ -14,6 +14,7 @@ import sys
 import json
 import logging
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
@@ -55,15 +56,11 @@ WORKSPACE_DIR = Path(os.getenv("WORKSPACE_DIR", os.getcwd()))
 if not CONFIG_FILE.startswith(('http://', 'https://', '/')):
     CONFIG_FILE = str(Path(__file__).parent / CONFIG_FILE)
 
-# Base directories
-BASE_DIR = Path(os.getenv("MCP_BASE_DIR", "~/.mcp-team-config")).expanduser()
-CACHE_DIR = BASE_DIR / "cache"
-CONTENT_DIR = BASE_DIR / "content"
-BACKUP_DIR = BASE_DIR / "backups"
-
-# Create directories
-for directory in [BASE_DIR, CACHE_DIR, CONTENT_DIR, BACKUP_DIR]:
-    directory.mkdir(parents=True, exist_ok=True)
+# Base directories - initially use default, will be updated based on config
+_BASE_DIR = None
+_CACHE_DIR = None
+_CONTENT_DIR = None
+_BACKUP_DIR = None
 
 # Initialize managers (will be created on first use)
 _repo_manager = None
@@ -73,11 +70,89 @@ _current_config: Optional[TeamConfig] = None
 _current_ide: Optional[IDEType] = None  # Detected or user-specified IDE
 
 
+def get_repo_specific_dirname(repo_url: Optional[str]) -> str:
+    """
+    Generate a unique directory name for a repository URL.
+    
+    Args:
+        repo_url: Repository URL (e.g., https://github.com/org/repo)
+        
+    Returns:
+        Directory name based on repo URL or 'default' if no URL
+    """
+    if not repo_url:
+        return "default"
+    
+    # Extract org/repo from common Git URL formats
+    # https://github.com/org/repo -> org_repo
+    # git@github.com:org/repo.git -> org_repo
+    repo_url = repo_url.rstrip('/')
+    
+    if 'github.com' in repo_url or 'gitlab.com' in repo_url or 'bitbucket.org' in repo_url:
+        # Extract the org/repo part
+        parts = repo_url.split('/')[-2:]
+        if len(parts) == 2:
+            org, repo = parts
+            repo = repo.replace('.git', '')
+            return f"{org}_{repo}"
+    
+    # Fallback: hash the URL
+    url_hash = hashlib.md5(repo_url.encode()).hexdigest()[:8]
+    return f"repo_{url_hash}"
+
+
+def get_base_directories(config: Optional[TeamConfig] = None) -> tuple[Path, Path, Path, Path]:
+    """
+    Get or create base directories for the current configuration.
+    
+    Args:
+        config: Team configuration (uses loaded config if None)
+        
+    Returns:
+        Tuple of (BASE_DIR, CACHE_DIR, CONTENT_DIR, BACKUP_DIR)
+    """
+    global _BASE_DIR, _CACHE_DIR, _CONTENT_DIR, _BACKUP_DIR
+    
+    if config is None:
+        config = _current_config
+    
+    # Determine repo-specific directory name
+    repo_dirname = "default"
+    if config and config.central_repo_url:
+        repo_dirname = get_repo_specific_dirname(config.central_repo_url)
+    
+    # Use environment variable base or default
+    base_parent = Path(os.getenv("MCP_BASE_DIR_ROOT", "~/.mcp-team-config")).expanduser()
+    
+    # Create repo-specific directory
+    base_dir = base_parent / repo_dirname
+    cache_dir = base_dir / "cache"
+    content_dir = base_dir / "content"
+    backup_dir = base_dir / "backups"
+    
+    # Create directories
+    for directory in [base_dir, cache_dir, content_dir, backup_dir]:
+        directory.mkdir(parents=True, exist_ok=True)
+    
+    # Update globals
+    _BASE_DIR = base_dir
+    _CACHE_DIR = cache_dir
+    _CONTENT_DIR = content_dir
+    _BACKUP_DIR = backup_dir
+    
+    return base_dir, cache_dir, content_dir, backup_dir
+
+
+# Initialize with default directories
+BASE_DIR, CACHE_DIR, CONTENT_DIR, BACKUP_DIR = get_base_directories()
+
+
 def get_repo_manager():
     """Get or create repository manager"""
     global _repo_manager
+    _, cache_dir, _, _ = get_base_directories()
     if _repo_manager is None:
-        _repo_manager = create_repo_manager(CACHE_DIR / "repos")
+        _repo_manager = create_repo_manager(cache_dir / "repos")
     return _repo_manager
 
 
@@ -181,7 +256,7 @@ def get_ide_content_dir(ide_type: IDEType, profile_name: str) -> Path:
 
 def load_team_config() -> TeamConfig:
     """Load team configuration from file or URL"""
-    global _current_config
+    global _current_config, BASE_DIR, CACHE_DIR, CONTENT_DIR, BACKUP_DIR
     
     config_source = CONFIG_FILE
     
@@ -210,6 +285,9 @@ def load_team_config() -> TeamConfig:
         
         if config:
             _current_config = config
+            # Reinitialize directories based on the loaded config's repo URL
+            BASE_DIR, CACHE_DIR, CONTENT_DIR, BACKUP_DIR = get_base_directories(config)
+            logger.info(f"Using repo-specific directory: {BASE_DIR}")
             return config
         else:
             return create_default_config()

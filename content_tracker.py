@@ -4,6 +4,7 @@ Content Tracker Module
 Tracks all content (instructions, rules, workflows, prompts) managed by team-config tool.
 Enables automatic cleanup of managed content while preserving manually added files.
 """
+import os
 import json
 import logging
 from pathlib import Path
@@ -26,7 +27,13 @@ class ContentTracker:
         Args:
             state_dir: Directory to store state files (defaults to ~/.mcp-team-config/state)
         """
-        self.state_dir = state_dir or Path.home() / ".mcp-team-config" / "state"
+        # If no state_dir provided, derive from MCP_BASE_DIR_ROOT
+        if state_dir is None:
+            base_root = Path(os.getenv("MCP_BASE_DIR_ROOT", "~/.mcp-team-config")).expanduser()
+            # Use a common state directory under the root for all repos
+            self.state_dir = base_root / "state"
+        else:
+            self.state_dir = state_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
     
     def _get_content_statefile(self, profile_name: str) -> Path:
