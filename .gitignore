@@ -12,3 +12,8 @@ wheels/
 # GitHub Copilot context files - ignore prompts but keep instructions and chatmodes
 .github/*/prompts/
 .github/*.prompts.md
+
+# IDE configuration directories (workspace-specific)
+.vscode/
+.cursor/
+.windsurf/

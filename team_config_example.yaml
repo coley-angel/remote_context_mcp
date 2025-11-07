@@ -32,6 +32,43 @@ supported_ides:
   - "cursor"
   - "windsurf"
 
+# IDE Configurations (optional - defaults are provided for common IDEs)
+# Define custom IDEs or override default paths
+ide_configs:
+  # Example: Override Windsurf paths
+  # windsurf:
+  #   name: "windsurf"
+  #   display_name: "Windsurf"
+  #   instructions_key: "windsurf.instructionsFilesLocations"
+  #   supports_mcp: true
+  #   darwin_paths:
+  #     settings_path: "~/.windsurf/settings.json"
+  #     mcp_config_path: "~/.codeium/windsurf/mcp_config.json"
+  #     rules_path: ".windsurf/"
+  #   win32_paths:
+  #     settings_path: "~/AppData/Roaming/Windsurf/User/settings.json"
+  #     mcp_config_path: "~/.codeium/windsurf/mcp_config.json"
+  #     rules_path: ".windsurf/"
+  #   linux_paths:
+  #     settings_path: "~/.config/windsurf/settings.json"
+  #     mcp_config_path: "~/.codeium/windsurf/mcp_config.json"
+  #     rules_path: ".windsurf/"
+  
+  # Example: Define a custom IDE (e.g., Zed)
+  # zed:
+  #   name: "zed"
+  #   display_name: "Zed Editor"
+  #   instructions_key: "zed.instructionsFilesLocations"
+  #   supports_mcp: true
+  #   darwin_paths:
+  #     settings_path: "~/.config/zed/settings.json"
+  #     mcp_config_path: ".zed/mcp.json"
+  #     rules_path: ".zed/rules"
+  #   linux_paths:
+  #     settings_path: "~/.config/zed/settings.json"
+  #     mcp_config_path: ".zed/mcp.json"
+  #     rules_path: ".zed/rules"
+
 # Profiles for different teams/environments
 profiles:
   

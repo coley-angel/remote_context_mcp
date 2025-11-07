@@ -1,367 +1,257 @@
-# Instructions MCP Server 📚
+# Team Configuration MCP Server
 
-A Model Context Protocol (MCP) server that fetches and manages remote instruction files for GitHub Copilot from centralized team locations. This server focuses solely on instruction management using a profile-based system for team collaboration.
+A Model Context Protocol (MCP) server for managing team-wide configuration including rules, instructions, workflows, prompts, and MCP servers across multiple IDEs (VS Code, Cursor, Windsurf).
 
-## 🌟 Features
+## Features
 
-- **📁 Profile-Based Management**: Multiple instruction profiles for different teams/contexts (e.g., "default", "dev", "corporate")
-- **🏢 Centralized Storage**: Instructions stored in `~/vscode-instructions` by default for team sharing
-- **⚙️ User Settings Integration**: Automatically updates VS Code user settings instead of workspace settings
-- **🌐 GitHub Integration**: Built-in support for fetching files from GitHub repositories with wildcard patterns
-- **🔄 Easy Sync**: Simple commands to fetch and sync instruction files from remote locations
+- **📋 Profile-Based Configuration**: Manage multiple configuration profiles for different teams/contexts
+- **🔄 Multi-IDE Support**: Sync configurations across VS Code, Cursor, and Windsurf
+- **📝 Rules Management**: Manage IDE rules with frontmatter validation (trigger, glob patterns)
+- **🔒 Security Validation**: Built-in security scanning for secrets, PII, and dangerous patterns
+- **🌐 Remote Content**: Fetch content from GitHub repositories and URLs
+- **🛠️ MCP Server Management**: Configure and manage MCP servers per profile
+- **🧹 Auto Cleanup**: Removes rules when profiles are deactivated
 
-## 🌟 Features
+## Installation
 
-- ** Profile-Based Management**: Multiple instruction profiles for different teams/contexts (e.g., "default", "dev", "corporate")
-- **� Centralized Storage**: Instructions stored in `~/vscode-instructions` by default for team sharing
-- **⚙️ User Settings Integration**: Automatically updates VS Code user settings instead of workspace settings
-- **🌐 GitHub Integration**: Built-in support for fetching files from GitHub repositories with wildcard patterns
-- **� Easy Sync**: Simple commands to fetch and sync instruction files from remote locations
-
-## �️ AI Security for Organizations
-
-This MCP server provides powerful capabilities for organizations to enhance their AI security posture while enabling safe, controlled AI-assisted development. Here's how it helps address key organizational concerns:
-
-### 🔐 Centralized Context Control
-
-**Challenge**: Developers using AI assistants may inadvertently expose sensitive information or follow inconsistent practices across the organization.
-
-**Solution**: The profile-based system allows organizations to:
-- **Standardize AI Interactions**: Define organization-wide context profiles that ensure consistent, secure AI behavior across all projects
-- **Role-Based Context**: Create different profiles for different teams (dev, security, production) with appropriate context boundaries
-- **Version Control**: Context configurations are stored in `context_config.yaml`, enabling audit trails and approval workflows
-
-```yaml
-project_types:
-  python:
-    corporate:
-      active: true
-      always_fetch:
-        instructions:
-          - "https://internal.company.com/secure-coding-guidelines.md"
-          - "https://internal.company.com/data-classification-rules.md"
-        prompts:
-          - "https://internal.company.com/approved-prompts.md"
-```
-
-### 🚫 Sensitive Data Protection
-
-**Challenge**: Preventing AI assistants from accessing or recommending patterns that could expose secrets, credentials, or proprietary information.
-
-**Solution**: 
-- **Curated Instructions**: Organizations can provide AI-specific guidelines that explicitly define what should never be suggested or exposed
-- **Prompt Isolation**: Sensitive prompts are stored in `.github/*/prompts/` and excluded from version control via `.gitignore`
-- **Context Boundaries**: Each profile defines strict boundaries for what context the AI can access
-
-### 🏢 Compliance & Governance
-
-**Challenge**: Meeting regulatory requirements (SOC2, GDPR, HIPAA) while enabling AI-assisted development.
-
-**Solution**:
-- **Audit Trails**: All context fetching and profile changes are logged
-- **Approval Workflows**: Configuration changes can go through standard git review processes
-- **Environment Separation**: Different profiles for development, staging, and production environments
-- **Documentation**: Automatic generation of AI context documentation for compliance reviews
-
-```yaml
-project_types:
-  healthcare:
-    hipaa-compliant:
-      active: true
-      always_fetch:
-        instructions:
-          - "https://compliance.company.com/hipaa-ai-guidelines.md"
-          - "https://compliance.company.com/data-handling-rules.md"
-      conditional:
-        has_patient_data:
-          instructions:
-            - "https://compliance.company.com/phi-protection-rules.md"
-```
-
-### 🎯 Secure Development Practices
-
-**Challenge**: Ensuring AI assistants promote secure coding practices rather than introducing vulnerabilities.
-
-**Solution**:
-- **Security-First Context**: Organizations can provide security-focused instructions that guide AI toward secure patterns
-- **Framework-Specific Rules**: Automatically load security guidelines based on detected frameworks (Django security for Python, React security for JavaScript)
-- **Vulnerability Prevention**: Context that explicitly warns against common security antipatterns
-
-### 🔄 Supply Chain Security
-
-**Challenge**: Managing the security of external context sources and preventing malicious context injection.
-
-**Solution**:
-- **Controlled Sources**: Organizations control exactly which URLs and repositories provide context
-- **Internal Context Hosting**: Support for private GitHub repositories and internal documentation systems
-- **Content Validation**: Downloaded context can be reviewed before activation
-- **Fallback Mechanisms**: Graceful degradation when external sources are unavailable
-
-### 📊 Usage Analytics & Monitoring
-
-**Challenge**: Understanding how AI tools are being used across the organization and identifying potential security risks.
-
-**Solution**:
-- **Profile Usage Tracking**: Monitor which profiles are active across different teams and projects
-- **Context Source Monitoring**: Track which external sources are being accessed
-- **Configuration Drift Detection**: Identify when local configurations diverge from organizational standards
-
-### 🌐 Multi-Environment Management
-
-**Challenge**: Maintaining different security postures across development, staging, and production environments.
-
-**Solution**:
-```yaml
-project_types:
-  python:
-    development:
-      active: false
-      always_fetch:
-        instructions:
-          - "https://internal.company.com/dev-guidelines.md"
-    
-    staging:
-      active: false
-      always_fetch:
-        instructions:
-          - "https://internal.company.com/staging-security-rules.md"
-    
-    production:
-      active: true
-      always_fetch:
-        instructions:
-          - "https://internal.company.com/production-security-strict.md"
-          - "https://internal.company.com/incident-response-guidelines.md"
-```
-
-### 🔧 Implementation Recommendations
-
-**For Security Teams:**
-1. **Start Small**: Begin with read-only monitoring to understand current AI usage patterns
-2. **Gradual Rollout**: Implement profiles incrementally, starting with the most security-critical projects
-3. **Regular Audits**: Schedule periodic reviews of context configurations and usage patterns
-4. **Incident Response**: Develop procedures for quickly updating context in response to security incidents
-
-**For Development Teams:**
-1. **Embrace Profiles**: Use organization-provided profiles as the foundation, customize as needed
-2. **Contribute Context**: Share useful, non-sensitive context sources with the organization
-3. **Security Awareness**: Understand how your context choices affect the AI's security recommendations
-
-**For Compliance Officers:**
-1. **Documentation**: Maintain clear documentation of approved AI usage patterns
-2. **Regular Reviews**: Include AI context configurations in compliance audits
-3. **Policy Integration**: Align AI context policies with existing data governance frameworks
-
-### 🎯 ROI for Organizations
-
-- **Reduced Security Incidents**: Proactive guidance prevents AI-suggested vulnerabilities
-- **Faster Onboarding**: New developers get consistent, secure AI guidance from day one
-- **Compliance Efficiency**: Automated enforcement of security policies through AI context
-- **Knowledge Scaling**: Distribute security expertise organization-wide through curated context
-
-This system transforms AI assistants from potential security risks into powerful allies for maintaining secure, compliant development practices at scale.
-
-## �🚀 Installation
-
-1. Clone this repository:
+1. Clone the repository:
    ```bash
-   git clone <your-repo-url>
-   cd mcp_get_remote_context
+   git clone https://github.com/coley-angel/remote_context_mcp.git
+   cd remote_context_mcp
    ```
 
-2. Install dependencies using `uv`:
+2. Install dependencies:
    ```bash
    uv sync
    ```
 
-3. Set up environment variables (optional):
+3. Set up environment variables:
    ```bash
-   export GITHUB_TOKEN="your_github_token"  # For GitHub API access and private repos
-   export CONTEXT_CONFIG_FILE="context_config.yaml"  # Config file location
+   export GITHUB_TOKEN="your_github_token"  # For private repos
    ```
 
-## 💻 Usage
+## Configuration
 
-### Configure VS Code
-
-Add the MCP server to your VS Code settings by creating or updating `.vscode/mcp.json`:
-
-```json
-{
-  "servers": {
-    "remote-context": {
-      "command": "uv",
-      "args": ["run", "python", "main.py"],
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "GITHUB_TOKEN": "${input:githubToken}",
-        "CONTEXT_CONFIG_FILE": "${input:configFile}",
-        "CONTEXT_WORKDIR": "${input:workDir}"
-      }
-    }
-  },
-  "inputs": [
-    {
-      "id": "githubToken",
-      "description": "GitHub Personal Access Token",
-      "type": "promptString",
-      "password": true
-    },
-    {
-      "id": "configFile",
-      "description": "Context configuration file path",
-      "type": "promptString",
-      "default": "context_config.yaml"
-    },
-    {
-      "id": "workDir",
-      "description": "Working directory",
-      "type": "promptString",
-      "default": "${workspaceFolder}"
-    }
-  ]
-}
-```
-
-### Available MCP Tools
-
-#### 🎯 Core Tools
-
-1. **`fetch_and_sync_instructions`** - Main tool to fetch instruction files
-   - Fetches instructions for a specific profile (or active profile)
-   - Downloads files to centralized directory (`~/vscode-instructions/{profile}/`)
-   - Updates VS Code user settings automatically
-
-2. **`get_available_profiles`** - List all available profiles
-   - Shows profile configurations and directories
-   - Indicates which profile is currently active
-
-3. **`set_active_profile`** - Switch active profile
-   ```json
-   {
-     "profile_name": "corporate"
-   }
-   ```
-
-4. **`list_context_config`** - View current configuration
-   - Shows all profiles and their instruction URLs
-
-## ⚙️ Configuration System
-
-### Profile Structure
-
-The configuration uses a simple profile-based system:
+Create a `team_config.yaml` file:
 
 ```yaml
+version: 1.0.0
+team_name: MyTeam
 profiles:
   default:
     active: true
-    instructions:
-      - "https://company.com/copilot/general-guidelines.md"
-      - repo: "your-org/copilot-instructions"
-        branch: "main"
-        paths: ["general/*.md"]
-  
-  corporate:
-    active: false
-    instructions:
-      - "https://company.com/copilot/corporate-guidelines.md"
-      - "https://company.com/copilot/security-guidelines.md"
-  
-  dev:
-    active: false
-    instructions:
-      - repo: "your-org/dev-instructions"
-        branch: "main"
-        paths: ["dev/*.md", "best-practices/*.md"]
+    description: Default team profile
+    
+    # Content sources
+    instructions: []
+    rules:
+      - repo: owner/repo
+        branch: main
+        paths: ["rules/*.md"]
+        token_env_var: GITHUB_TOKEN
+    workflows: []
+    prompts: []
+    
+    # MCP servers to install
+    mcp_servers:
+      - name: github
+        command: npx
+        args: ["-y", "@modelcontextprotocol/server-github"]
+        enabled: true
+    
+    # Security settings
+    security:
+      enabled: true
+      level: basic  # none, basic, strict, paranoid
+      scan_for_secrets: true
+      scan_for_pii: true
 ```
 
-### Directory Structure
+## MCP Tools
 
-Instructions are stored centrally in your home directory:
+### Core Tools
 
+- **`sync_team_config`** - Sync profile content to IDEs
+- **`list_profiles`** - List all configuration profiles
+- **`set_active_profile`** - Switch active profile (auto-cleans previous)
+- **`cleanup_profile_rules`** - Manually cleanup rules for a profile
+
+### IDE Management
+
+- **`list_installed_ides`** - Detect installed IDEs
+- **`get_current_ide_info`** - Get current IDE information
+- **`set_ide`** - Manually set IDE if not detected
+
+### Configuration
+
+- **`get_config`** - View current configuration
+- **`reload_config`** - Reload configuration from file
+- **`update_mcp_servers`** - Update MCP server configs
+- **`validate_content_security`** - Scan content for security issues
+
+## Rules with Frontmatter
+
+All rule files must include frontmatter:
+
+```markdown
+---
+trigger: always_on  # or: manual, on_demand
+glob: *.py          # optional: file pattern
+description: Python style guide  # optional
+---
+
+# Rule Content Here
 ```
-~/vscode-instructions/
-├── default/              # Default profile
-│   ├── guidelines.instructions.md
-│   └── security.instructions.md
-├── corporate/            # Corporate profile
-│   └── corporate-guidelines.instructions.md
-└── dev/                  # Development profile
-    ├── dev-guidelines.instructions.md
-    └── best-practices.instructions.md
-```
 
-## 🎯 Workflow Examples
+The server automatically validates and adds frontmatter if missing (defaults to `always_on`).
 
-### Basic Usage
+## IDE-Specific Behavior
 
-1. **Sync instructions for active profile:**
-   ```
-   Use MCP tool: fetch_and_sync_instructions
-   ```
+### Default IDE Paths
 
-2. **Switch to corporate profile:**
-   ```
-   Use MCP tool: set_active_profile
-   profile_name: "corporate"
-   ```
+**Windsurf**
+- Rules: `~/.windsurf/` (global)
+- MCP Config: `~/.codeium/windsurf/mcp_config.json`
+- Settings: `~/.windsurf/settings.json` (macOS)
 
-3. **List available profiles:**
-   ```
-   Use MCP tool: get_available_profiles
-   ```
+**VS Code**
+- Rules: `.vscode/rules/` (workspace)
+- MCP Config: `.vscode/mcp.json`
+- Settings: `~/Library/Application Support/Code/User/settings.json` (macOS)
 
-4. **View configuration:**
-   ```
-   Use MCP tool: list_context_config
-   ```
+**Cursor**
+- Rules: `.cursor/rules/` (workspace)
+- MCP Config: `.cursor/mcp.json`
+- Settings: `~/Library/Application Support/Cursor/User/settings.json` (macOS)
 
-### Advanced GitHub Integration
+### Custom IDE Configuration
 
-The server supports GitHub repository patterns:
+You can define custom IDEs or override default paths in `team_config.yaml`:
 
 ```yaml
-instructions:
-  - repo: "microsoft/typescript"
-    branch: "main"
-    paths: ["docs/*.md", "guides/**/*.md"]
+ide_configs:
+  # Define a custom IDE
+  my_ide:
+    name: "my_ide"
+    display_name: "My Custom IDE"
+    instructions_key: "myide.instructionsFilesLocations"
+    supports_mcp: true
+    darwin_paths:
+      settings_path: "~/.myide/settings.json"
+      mcp_config_path: ".myide/mcp.json"
+      rules_path: ".myide/rules"
+    win32_paths:
+      settings_path: "~/AppData/Roaming/MyIDE/settings.json"
+      mcp_config_path: ".myide/mcp.json"
+      rules_path: ".myide/rules"
+    linux_paths:
+      settings_path: "~/.config/myide/settings.json"
+      mcp_config_path: ".myide/mcp.json"
+      rules_path: ".myide/rules"
 ```
 
-This fetches all matching files using GitHub's API with wildcard expansion.
+This allows the server to support **any IDE** by defining where files should be placed.
 
-## 🔒 Security & Best Practices
+## Security Features
 
-- **GitHub Token**: Store in environment variables, never commit
-- **Private Context**: Add `.github/*/` to `.gitignore` to keep downloaded context local
-- **Configuration**: Commit `context_config.yaml` to share team configurations
+The security validator scans content for:
 
-## 🤝 Contributing
+- **Secrets**: API keys, tokens, passwords, private keys
+- **PII**: Emails, SSNs, phone numbers, credit cards
+- **Dangerous Code**: eval(), exec(), shell=True
+- **Custom Patterns**: Forbidden/required patterns
+- **File Size**: Configurable limits
 
-1. **Add New Project Types**: Extend detection logic in `detect_project_type()`
-2. **Add Framework Support**: Update `detect_frameworks_and_libraries()`
-3. **Custom Profiles**: Create specialized profiles for different use cases
-4. **Context Sources**: Contribute useful public context URLs
+Security levels:
+- `none` - No validation
+- `basic` - Blocks critical issues (secrets)
+- `strict` - Blocks critical + high severity
+- `paranoid` - Blocks all issues
 
-## 📋 Environment Variables
+## Development
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `GITHUB_TOKEN` | GitHub personal access token | None |
-| `CONTEXT_CONFIG_FILE` | Configuration file path | `context_config.yaml` |
-| `INSTRUCTIONS_DIR` | Base directory for instructions | `~/vscode-instructions` |
+### Project Structure
 
-## 🐛 Troubleshooting
+```
+remote_context_mcp/
+├── main.py                 # MCP server entry point
+├── ide_manager.py          # IDE configuration management
+├── frontmatter_utils.py    # Rule frontmatter handling
+├── security_validator.py   # Security scanning
+├── config_loader.py        # Configuration loading
+├── schemas.py              # Data models
+├── tests/                  # Test files
+│   ├── test_frontmatter.py
+│   ├── test_mcp_tools.py
+│   └── test_server.py
+└── docs/                   # Documentation
+    ├── MIGRATION.md
+    ├── IDE_DETECTION.md
+    └── TRACKING_SYSTEM.md
+```
 
-- **Profile not switching**: Check that VS Code user settings are being updated correctly
-- **Instructions not loading**: Verify GitHub token for private repos and URL accessibility
-- **Network errors**: Check internet connection and URL accessibility
-- **Permission errors**: Ensure write access to instructions directory (`~/vscode-instructions`)
+### Running Tests
 
-## 📝 License
+```bash
+# Test frontmatter utilities
+python tests/test_frontmatter.py
 
-MIT License - Feel free to extend and customize for your team's needs!
+# Test MCP tools
+python tests/test_mcp_tools.py
+
+# Test server components
+python tests/test_server.py
+```
+
+### Adding IDE Support
+
+The server automatically detects installed IDEs. If your IDE isn't detected:
+
+1. The server will prompt you to specify which IDE you're using
+2. Or manually set via `set_ide` MCP tool
+3. Only the IDE you're using will have configurations installed
+
+## Workflow Example
+
+1. **Create configuration profile**:
+   ```yaml
+   profiles:
+     dev:
+       active: true
+       rules:
+         - repo: myorg/coding-standards
+           paths: ["rules/*.md"]
+   ```
+
+2. **Sync to your IDE**:
+   ```
+   Use MCP tool: sync_team_config
+   profile_name: dev
+   ```
+
+3. **Switch profiles** (auto-cleans old rules):
+   ```
+   Use MCP tool: set_active_profile
+   profile_name: production
+   auto_sync: true
+   ```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests to ensure they pass
+5. Submit a pull request
+
+## License
+
+MIT License - See LICENSE file for details
 
 ---
 
-*This tool helps teams maintain centralized, consistent AI instruction sets for better collaboration! 🚀*
+**Documentation**:
+- [Migration Guide](docs/MIGRATION.md)
+- [IDE Detection](docs/IDE_DETECTION.md)
+- [Tracking System](docs/TRACKING_SYSTEM.md)
+- [MCP Server Management](docs/MANAGED_SERVERS.md)

@@ -160,13 +160,27 @@ async def sync_profile_tool(
             if rule_path.exists():
                 rules_content[rule_path.name] = rule_path.read_text(encoding='utf-8')
         
-        ide_sync_results = ide_manager.sync_to_all_ides(
-            instruction_paths,
-            profile.mcp_servers if profile.mcp_servers else None,
-            workspace_dir,
-            profile_name=profile_name,
-            rules_content=rules_content if rules_content else None
-        )
+        # Sync to current IDE only (or all if requested via workspace_dir being None)
+        if current_ide and workspace_dir is not None:
+            # Sync only to current IDE
+            success = ide_manager.sync_to_ide(
+                current_ide,
+                instruction_paths,
+                profile.mcp_servers if profile.mcp_servers else None,
+                workspace_dir,
+                profile_name=profile_name,
+                rules_content=rules_content if rules_content else None
+            )
+            ide_sync_results = {current_ide: success}
+        else:
+            # Sync to all detected IDEs
+            ide_sync_results = ide_manager.sync_to_all_ides(
+                instruction_paths,
+                profile.mcp_servers if profile.mcp_servers else None,
+                workspace_dir,
+                profile_name=profile_name,
+                rules_content=rules_content if rules_content else None
+            )
         
         return json.dumps({
             "success": True,

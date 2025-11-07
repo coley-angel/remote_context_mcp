@@ -14,18 +14,108 @@ supported_ides:
 profiles:
   default:
     active: true
-    description: Default test profile
+    description: Default development profile with Windsurf support
     instructions: []
     rules:
     - repo: coley-angel/remote_context_mcp
       paths:
-      - rules/python_pep8_camelcase.md
+      - rules/windsurf_cascade_guidelines.md
+      - rules/code_quality_standards.md
       token_env_var: GITHUB_TOKEN
-    workflows: []
+    workflows:
+    - repo: coley-angel/remote_context_mcp
+      paths:
+      - workflows/pull_request_workflow.md
+      token_env_var: GITHUB_TOKEN
     prompts: []
-    mcp_servers: []
+    mcp_servers:
+    - name: github
+      command: npx
+      args:
+      - "-y"
+      - "@modelcontextprotocol/server-github"
+      env:
+        GITHUB_TOKEN: "${GITHUB_TOKEN}"
+      enabled: true
+      description: GitHub integration for repository access
+    - name: memory
+      command: npx
+      args:
+      - "-y"
+      - "@modelcontextprotocol/server-memory"
+      env:
+        MEMORY_FILE_PATH: ""
+      enabled: true
+      description: Persistent memory across conversations
+    - name: sequential-thinking
+      command: npx
+      args:
+      - "-y"
+      - "@modelcontextprotocol/server-sequential-thinking"
+      env: {}
+      enabled: true
+      description: Enhanced reasoning and problem-solving
     security:
       enabled: true
       level: basic
     tags:
-    - test
+    - development
+    - windsurf
+  
+  terraform:
+    active: false
+    description: Terraform infrastructure development profile
+    instructions: []
+    rules:
+    - repo: coley-angel/remote_context_mcp
+      paths:
+      - rules/terraform_best_practices.md
+      - rules/code_quality_standards.md
+      token_env_var: GITHUB_TOKEN
+    workflows:
+    - repo: coley-angel/remote_context_mcp
+      paths:
+      - workflows/terraform_workflow.md
+      - workflows/pull_request_workflow.md
+      token_env_var: GITHUB_TOKEN
+    prompts: []
+    mcp_servers:
+    - name: github
+      command: npx
+      args:
+      - "-y"
+      - "@modelcontextprotocol/server-github"
+      env:
+        GITHUB_TOKEN: "${GITHUB_TOKEN}"
+      enabled: true
+      description: GitHub integration for repository access
+    - name: memory
+      command: npx
+      args:
+      - "-y"
+      - "@modelcontextprotocol/server-memory"
+      env:
+        MEMORY_FILE_PATH: ""
+      enabled: true
+      description: Persistent memory across conversations
+    - name: sequential-thinking
+      command: npx
+      args:
+      - "-y"
+      - "@modelcontextprotocol/server-sequential-thinking"
+      env: {}
+      enabled: true
+      description: Enhanced reasoning and problem-solving
+    security:
+      enabled: true
+      level: strict
+      forbidden_patterns:
+      - "(?i)hardcoded.*password"
+      - "(?i)hardcoded.*secret"
+      - "(?i)hardcoded.*key"
+      scan_for_secrets: true
+      scan_for_pii: false
+    tags:
+    - terraform
+    - infrastructure
+    - iac

@@ -82,10 +82,13 @@ def get_repo_manager():
 
 
 def get_ide_manager():
-    """Get or create IDE manager"""
+    """Get or create IDE manager with IDE configs from team config"""
     global _ide_manager
     if _ide_manager is None:
-        _ide_manager = create_ide_manager()
+        from ide_adapter import loadIdeConfigsFromTeamConfig
+        config = load_team_config()
+        ide_configs = loadIdeConfigsFromTeamConfig(config)
+        _ide_manager = create_ide_manager(ide_configs)
     return _ide_manager
 
 
@@ -128,21 +131,17 @@ def detect_current_ide() -> Optional[IDEType]:
     return None
 
 
-def get_current_ide() -> IDEType:
+def get_current_ide() -> Optional[IDEType]:
     """
     Get the current IDE (detected or user-specified).
     
     Returns:
-        Current IDE type, defaults to VS Code if cannot determine
+        Current IDE type, or None if cannot determine
     """
     global _current_ide
     
     if _current_ide is None:
         _current_ide = detect_current_ide()
-    
-    # Default to VS Code if still None
-    if _current_ide is None:
-        _current_ide = IDEType.VSCODE
     
     return _current_ide
 
@@ -779,6 +778,20 @@ async def get_current_ide_info() -> str:
         current_ide = get_current_ide()
         detected_ide = detect_current_ide()
         
+        # Check if IDE could not be detected
+        if current_ide is None:
+            ide_manager = get_ide_manager()
+            installed_ides = ide_manager.detect_installed_ides()
+            
+            return json.dumps({
+                "success": False,
+                "error": "Could not detect current IDE",
+                "message": "Please specify which IDE you are using with the 'set_ide' tool",
+                "detected_ide": None,
+                "installed_ides": [ide.value for ide in installed_ides],
+                "instructions": "Call set_ide with one of: vscode, cursor, or windsurf"
+            }, indent=2)
+        
         ide_manager = get_ide_manager()
         settings_path = ide_manager.get_settings_path(current_ide)
         
@@ -789,11 +802,7 @@ async def get_current_ide_info() -> str:
             "auto_detected": detected_ide is not None,
             "settings_path": str(settings_path),
             "instructions_dir": str(get_ide_content_dir(current_ide, "default")),
-            "instructions_dirs": {
-                "vscode": str(get_ide_content_dir(IDEType.VSCODE, "default")),
-                "cursor": str(get_ide_content_dir(IDEType.CURSOR, "default")),
-                "windsurf": str(get_ide_content_dir(IDEType.WINDSURF, "default"))
-            }
+            "installed_ides": [ide.value for ide in ide_manager.detect_installed_ides()]
         }, indent=2)
         
     except Exception as e:

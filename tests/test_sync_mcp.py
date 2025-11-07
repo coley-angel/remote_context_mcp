@@ -4,7 +4,11 @@ Test script to manually sync MCP configuration
 """
 import asyncio
 import json
+import sys
 from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import the MCP tool function
 from main import update_mcp_servers, load_team_config, get_ide_manager

@@ -19,7 +19,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from schemas import IDEType, IDEConfig, get_ide_config, MCPServerConfig
+from schemas import IDEType, IDEConfig, IDEPathConfig, MCPServerConfig, get_default_ide_configs
 from frontmatter_utils import addFrontmatterToContent, validateFrontmatter, parseFrontmatter
 
 logger = logging.getLogger(__name__)
@@ -31,21 +31,50 @@ class IDEManager:
     MANAGED_MARKER = "_managed_by"
     MANAGED_VALUE = "team-config"
     
-    def __init__(self, platform: Optional[str] = None, state_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        ide_configs: Optional[Dict[str, IDEConfig]] = None,
+        platform: Optional[str] = None,
+        state_dir: Optional[Path] = None
+    ):
         """
         Initialize IDE manager
         
         Args:
+            ide_configs: Dictionary of IDE configurations by name (uses defaults if None)
             platform: Platform name (darwin, win32, linux) or None to auto-detect
             state_dir: Directory to store state files (defaults to ~/.mcp-team-config/state)
         """
         self.platform = platform or sys.platform
-        self.ide_configs = {
-            ide_type: get_ide_config(ide_type, self.platform)
-            for ide_type in IDEType
-        }
+        
+        # Load IDE configurations (use defaults if not provided)
+        if ide_configs is None or not ide_configs:
+            self.ide_configs_by_name = get_default_ide_configs()
+        else:
+            # Merge with defaults (config overrides defaults)
+            defaults = get_default_ide_configs()
+            defaults.update(ide_configs)
+            self.ide_configs_by_name = defaults
+        
         self.state_dir = state_dir or Path.home() / ".mcp-team-config" / "state"
         self.state_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _getIdeConfig(self, ideType: IDEType) -> IDEConfig:
+        """Get IDE config for given IDE type"""
+        from ide_adapter import getIdeNameFromType
+        ideName = getIdeNameFromType(ideType)
+        config = self.ide_configs_by_name.get(ideName)
+        if not config:
+            raise ValueError(f"Unknown IDE: {ideType}")
+        return config
+    
+    def _getIdePaths(self, ideType: IDEType) -> IDEPathConfig:
+        """Get IDE paths for given IDE type and current platform"""
+        config = self._getIdeConfig(ideType)
+        paths = config.get_paths_for_platform(self.platform)
+        if not paths:
+            raise ValueError(f"No paths configured for IDE '{ideType.value}' on platform '{self.platform}'")
+        return paths
     
     def get_settings_path(self, ide_type: IDEType) -> Path:
         """
@@ -57,8 +86,8 @@ class IDEManager:
         Returns:
             Path to settings file
         """
-        config = self.ide_configs[ide_type]
-        return Path(config.settings_path).expanduser()
+        paths = self._getIdePaths(ide_type)
+        return Path(paths.settings_path).expanduser()
     
     def read_settings(self, ide_type: IDEType) -> Dict[str, Any]:
         """
@@ -403,7 +432,7 @@ class IDEManager:
         Returns:
             True if successful, False otherwise
         """
-        config = self.ide_configs[ide_type]
+        config = self._getIdeConfig(ide_type)
         settings = self.read_settings(ide_type)
         
         if track_managed:
@@ -716,6 +745,63 @@ class IDEManager:
         
         return installed
     
+    def sync_to_ide(
+        self,
+        ide_type: IDEType,
+        instruction_locations: Dict[str, bool],
+        mcp_servers: Optional[List[MCPServerConfig]] = None,
+        workspace_dir: Optional[Path] = None,
+        profile_name: Optional[str] = None,
+        rules_content: Optional[Dict[str, str]] = None
+    ) -> bool:
+        """
+        Sync configurations to a specific IDE
+        
+        Args:
+            ide_type: IDE type to sync to
+            instruction_locations: Dictionary of instruction locations
+            mcp_servers: Optional list of MCP server configurations
+            workspace_dir: Optional workspace directory for MCP configs
+            profile_name: Name of the profile managing these servers
+            rules_content: Optional dictionary of {filename: content} for rule files
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Update instruction locations
+            success = self.update_instruction_locations(ide_type, instruction_locations)
+            
+            # Sync rule files if provided
+            if rules_content and success:
+                success = self.sync_rules_to_ide(
+                    ide_type,
+                    rules_content,
+                    workspace_dir,
+                    profile_name
+                )
+            
+            # Update MCP servers if provided
+            if mcp_servers is not None and success:
+                success = self.update_mcp_servers(
+                    ide_type,
+                    mcp_servers,
+                    workspace_dir,
+                    merge=True,
+                    profile_name=profile_name
+                )
+            
+            if success:
+                logger.info(f"Successfully synced to {ide_type.value}")
+            else:
+                logger.warning(f"Failed to sync to {ide_type.value}")
+            
+            return success
+                
+        except Exception as e:
+            logger.error(f"Error syncing to {ide_type.value}: {e}")
+            return False
+    
     def sync_to_all_ides(
         self,
         instruction_locations: Dict[str, bool],
@@ -741,39 +827,14 @@ class IDEManager:
         installed_ides = self.detect_installed_ides()
         
         for ide_type in installed_ides:
-            try:
-                # Update instruction locations
-                success = self.update_instruction_locations(ide_type, instruction_locations)
-                
-                # Sync rule files if provided
-                if rules_content and success:
-                    success = self.sync_rules_to_ide(
-                        ide_type,
-                        rules_content,
-                        workspace_dir,
-                        profile_name
-                    )
-                
-                # Update MCP servers if provided
-                if mcp_servers is not None and success:
-                    success = self.update_mcp_servers(
-                        ide_type,
-                        mcp_servers,
-                        workspace_dir,
-                        merge=True,
-                        profile_name=profile_name
-                    )
-                
-                results[ide_type] = success
-                
-                if success:
-                    logger.info(f"Successfully synced to {ide_type.value}")
-                else:
-                    logger.warning(f"Failed to sync to {ide_type.value}")
-                    
-            except Exception as e:
-                logger.error(f"Error syncing to {ide_type.value}: {e}")
-                results[ide_type] = False
+            results[ide_type] = self.sync_to_ide(
+                ide_type,
+                instruction_locations,
+                mcp_servers,
+                workspace_dir,
+                profile_name,
+                rules_content
+            )
         
         return results
     
@@ -871,14 +932,18 @@ class IDEManager:
             return False
 
 
-def create_ide_manager(platform: Optional[str] = None) -> IDEManager:
+def create_ide_manager(
+    ide_configs: Optional[Dict[str, IDEConfig]] = None,
+    platform: Optional[str] = None
+) -> IDEManager:
     """
     Create an IDE manager instance
     
     Args:
+        ide_configs: Optional IDE configurations (uses defaults if None)
         platform: Platform name or None to auto-detect
     
     Returns:
         IDEManager instance
     """
-    return IDEManager(platform)
+    return IDEManager(ide_configs, platform)

@@ -75,15 +75,71 @@ class MCPServerConfig:
 
 
 @dataclass
+class IDEPathConfig:
+    """Platform-specific paths for an IDE"""
+    settings_path: str
+    mcp_config_path: Optional[str] = None
+    rules_path: Optional[str] = None
+    
+    def resolve_for_platform(self, platform: str) -> 'IDEPathConfig':
+        """
+        Resolve path templates for specific platform
+        
+        Args:
+            platform: Platform name (darwin, win32, linux)
+        
+        Returns:
+            IDEPathConfig with resolved paths
+        """
+        # Path templates can use {platform} placeholder
+        settings = self.settings_path.format(platform=platform)
+        mcp = self.mcp_config_path.format(platform=platform) if self.mcp_config_path else None
+        rules = self.rules_path.format(platform=platform) if self.rules_path else None
+        
+        return IDEPathConfig(
+            settings_path=settings,
+            mcp_config_path=mcp,
+            rules_path=rules
+        )
+
+
+@dataclass
 class IDEConfig:
     """IDE-specific configuration"""
-    ide_type: IDEType
-    settings_path: str
+    name: str  # IDE identifier (e.g., "vscode", "cursor", "windsurf")
+    display_name: str  # Display name (e.g., "VS Code")
     instructions_key: str  # Key in settings for instructions
-    mcp_config_path: Optional[str] = None  # Path to MCP config file
-    rules_path: Optional[str] = None  # Path to rules directory
     supports_mcp: bool = True
+    
+    # Platform-specific paths
+    darwin_paths: Optional[IDEPathConfig] = None  # macOS
+    win32_paths: Optional[IDEPathConfig] = None  # Windows
+    linux_paths: Optional[IDEPathConfig] = None  # Linux
+    
+    # Custom settings
     custom_settings: Dict[str, Any] = field(default_factory=dict)
+    
+    def get_paths_for_platform(self, platform: str) -> Optional[IDEPathConfig]:
+        """
+        Get path configuration for specific platform
+        
+        Args:
+            platform: Platform name (darwin, win32, linux)
+        
+        Returns:
+            IDEPathConfig for the platform or None
+        """
+        platform_map = {
+            'darwin': self.darwin_paths,
+            'win32': self.win32_paths,
+            'linux': self.linux_paths
+        }
+        
+        paths = platform_map.get(platform)
+        if paths:
+            return paths.resolve_for_platform(platform)
+        
+        return None
 
 
 @dataclass
@@ -146,10 +202,13 @@ class TeamConfig:
     team_name: str = "default"
     profiles: Dict[str, Profile] = field(default_factory=dict)
     
+    # IDE definitions (can override defaults)
+    ide_configs: Dict[str, IDEConfig] = field(default_factory=dict)
+    
     # Global settings
     global_security: SecurityConfig = field(default_factory=SecurityConfig)
-    supported_ides: List[IDEType] = field(default_factory=lambda: [
-        IDEType.VSCODE, IDEType.CURSOR, IDEType.WINDSURF
+    supported_ides: List[str] = field(default_factory=lambda: [
+        "vscode", "cursor", "windsurf"
     ])
     
     # Central repository for team configs
@@ -165,61 +224,76 @@ class TeamConfig:
     updated_by: Optional[str] = None
 
 
-# IDE Configuration Mappings
-IDE_CONFIGS = {
-    IDEType.VSCODE: IDEConfig(
-        ide_type=IDEType.VSCODE,
-        settings_path="~/Library/Application Support/Code/User/settings.json",
-        instructions_key="chat.instructionsFilesLocations",
-        mcp_config_path=".vscode/mcp.json",
-        rules_path=".vscode/rules",
-    ),
-    IDEType.CURSOR: IDEConfig(
-        ide_type=IDEType.CURSOR,
-        settings_path="~/Library/Application Support/Cursor/User/settings.json",
-        instructions_key="cursor.instructionsFilesLocations",
-        mcp_config_path=".cursor/mcp.json",
-        rules_path=".cursor/rules",
-    ),
-    IDEType.WINDSURF: IDEConfig(
-        ide_type=IDEType.WINDSURF,
-        settings_path="~/.windsurf/settings.json",
-        instructions_key="windsurf.instructionsFilesLocations",
-        mcp_config_path="~/.codeium/windsurf/mcp_config.json",
-        rules_path=".windsurf/rules",  # New location, replaces .windsurfrules
-    ),
-}
-
-
-def get_ide_config(ide_type: IDEType, platform: str = "darwin") -> IDEConfig:
+# Default IDE Configuration Templates
+def get_default_ide_configs() -> Dict[str, IDEConfig]:
     """
-    Get IDE configuration adjusted for the current platform
-    
-    Args:
-        ide_type: The IDE type
-        platform: Platform name (darwin, win32, linux)
+    Get default IDE configurations for common IDEs
     
     Returns:
-        IDEConfig with platform-specific paths
+        Dictionary of IDE configurations keyed by IDE name
     """
-    config = IDE_CONFIGS.get(ide_type)
-    if not config:
-        raise ValueError(f"Unknown IDE type: {ide_type}")
-    
-    # Adjust paths for platform
-    if platform == "win32":
-        if ide_type == IDEType.VSCODE:
-            config.settings_path = "~/AppData/Roaming/Code/User/settings.json"
-        elif ide_type == IDEType.CURSOR:
-            config.settings_path = "~/AppData/Roaming/Cursor/User/settings.json"
-        elif ide_type == IDEType.WINDSURF:
-            config.settings_path = "~/AppData/Roaming/Windsurf/User/settings.json"
-    elif platform == "linux":
-        if ide_type == IDEType.VSCODE:
-            config.settings_path = "~/.config/Code/User/settings.json"
-        elif ide_type == IDEType.CURSOR:
-            config.settings_path = "~/.config/Cursor/User/settings.json"
-        elif ide_type == IDEType.WINDSURF:
-            config.settings_path = "~/.config/windsurf/settings.json"
-    
-    return config
+    return {
+        "vscode": IDEConfig(
+            name="vscode",
+            display_name="VS Code",
+            instructions_key="chat.instructionsFilesLocations",
+            supports_mcp=True,
+            darwin_paths=IDEPathConfig(
+                settings_path="~/Library/Application Support/Code/User/settings.json",
+                mcp_config_path=".vscode/mcp.json",
+                rules_path=".vscode/rules"
+            ),
+            win32_paths=IDEPathConfig(
+                settings_path="~/AppData/Roaming/Code/User/settings.json",
+                mcp_config_path=".vscode/mcp.json",
+                rules_path=".vscode/rules"
+            ),
+            linux_paths=IDEPathConfig(
+                settings_path="~/.config/Code/User/settings.json",
+                mcp_config_path=".vscode/mcp.json",
+                rules_path=".vscode/rules"
+            )
+        ),
+        "cursor": IDEConfig(
+            name="cursor",
+            display_name="Cursor",
+            instructions_key="cursor.instructionsFilesLocations",
+            supports_mcp=True,
+            darwin_paths=IDEPathConfig(
+                settings_path="~/Library/Application Support/Cursor/User/settings.json",
+                mcp_config_path=".cursor/mcp.json",
+                rules_path=".cursor/rules"
+            ),
+            win32_paths=IDEPathConfig(
+                settings_path="~/AppData/Roaming/Cursor/User/settings.json",
+                mcp_config_path=".cursor/mcp.json",
+                rules_path=".cursor/rules"
+            ),
+            linux_paths=IDEPathConfig(
+                settings_path="~/.config/Cursor/User/settings.json",
+                mcp_config_path=".cursor/mcp.json",
+                rules_path=".cursor/rules"
+            )
+        ),
+        "windsurf": IDEConfig(
+            name="windsurf",
+            display_name="Windsurf",
+            instructions_key="windsurf.instructionsFilesLocations",
+            supports_mcp=True,
+            darwin_paths=IDEPathConfig(
+                settings_path="~/.windsurf/settings.json",
+                mcp_config_path="~/.codeium/windsurf/mcp_config.json",
+                rules_path=".windsurf/"
+            ),
+            win32_paths=IDEPathConfig(
+                settings_path="~/AppData/Roaming/Windsurf/User/settings.json",
+                mcp_config_path="~/.codeium/windsurf/mcp_config.json",
+                rules_path=".windsurf/"
+            ),
+            linux_paths=IDEPathConfig(
+                settings_path="~/.config/windsurf/settings.json",
+                mcp_config_path="~/.codeium/windsurf/mcp_config.json",
+                rules_path=".windsurf/"
+            )
+        )
+    }
