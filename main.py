@@ -1,10 +1,13 @@
 #!/usr/bin/env uv run python
 """
-Instructions MCP Server Main Entry Point
+Team Configuration MCP Server
 
-This MCP server provides tools for fetching and managing remote instruction
-files for GitHub Copilot from centralized team locations. It supports 
-profile-based management where teams can maintain different instruction sets.
+Enhanced MCP server for managing team configurations across multiple IDEs:
+- Windsurf, Cursor, VS Code support
+- Rules, workflows, instructions, and prompts management
+- Security validation for team content
+- Git-based central repository syncing
+- Dynamic MCP server configuration and reloading
 """
 import os
 import sys
@@ -13,6 +16,7 @@ import logging
 import asyncio
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
+from datetime import datetime
 
 import yaml
 import httpx
@@ -21,11 +25,18 @@ import fnmatch
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
-# Set up logging
+# Import new modules
+from schemas import IDEType, ContentType, TeamConfig, Profile
+from config_loader import ConfigLoader
+from security_validator import SecurityValidator, create_default_security_config
+from repo_manager import create_repo_manager
+from ide_manager import create_ide_manager
+
+# Set up logging (use stderr to avoid interfering with MCP stdio protocol)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[logging.StreamHandler(sys.stderr)]
 )
 logger = logging.getLogger(__name__)
 
@@ -33,589 +44,927 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Initialize FastMCP
-mcp = FastMCP("InstructionsMCP")
+mcp = FastMCP("TeamConfigMCP")
 
 # Configuration
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-CONFIG_FILE = os.getenv("CONTEXT_CONFIG_FILE", "context_config.yaml")
+CONFIG_FILE = os.getenv("TEAM_CONFIG_FILE", "team_config.yaml")
+WORKSPACE_DIR = Path(os.getenv("WORKSPACE_DIR", os.getcwd()))
+
 # Make CONFIG_FILE absolute if it's a relative path
 if not CONFIG_FILE.startswith(('http://', 'https://', '/')):
     CONFIG_FILE = str(Path(__file__).parent / CONFIG_FILE)
-INSTRUCTIONS_DIR = Path(os.getenv("INSTRUCTIONS_DIR", 
-                                  "~/vscode-instructions")).expanduser()
 
-# Default context configurations for different profiles
-DEFAULT_CONTEXTS = {
-    "profiles": {
-        "default": {
-            "active": True,
-            "instructions": []
-        }
+# Base directories
+BASE_DIR = Path(os.getenv("MCP_BASE_DIR", "~/.mcp-team-config")).expanduser()
+CACHE_DIR = BASE_DIR / "cache"
+CONTENT_DIR = BASE_DIR / "content"
+BACKUP_DIR = BASE_DIR / "backups"
+
+# Create directories
+for directory in [BASE_DIR, CACHE_DIR, CONTENT_DIR, BACKUP_DIR]:
+    directory.mkdir(parents=True, exist_ok=True)
+
+# Initialize managers (will be created on first use)
+_repo_manager = None
+_ide_manager = None
+_security_validator = None
+_current_config: Optional[TeamConfig] = None
+_current_ide: Optional[IDEType] = None  # Detected or user-specified IDE
+
+
+def get_repo_manager():
+    """Get or create repository manager"""
+    global _repo_manager
+    if _repo_manager is None:
+        _repo_manager = create_repo_manager(CACHE_DIR / "repos")
+    return _repo_manager
+
+
+def get_ide_manager():
+    """Get or create IDE manager"""
+    global _ide_manager
+    if _ide_manager is None:
+        _ide_manager = create_ide_manager()
+    return _ide_manager
+
+
+def get_security_validator(config: Optional[TeamConfig] = None):
+    """Get or create security validator"""
+    global _security_validator
+    if config and config.global_security:
+        return SecurityValidator(config.global_security)
+    if _security_validator is None:
+        _security_validator = SecurityValidator(create_default_security_config())
+    return _security_validator
+
+
+def detect_current_ide() -> Optional[IDEType]:
+    """
+    Detect which IDE is currently running this MCP server.
+    
+    Returns:
+        Detected IDE type or None if cannot determine
+    """
+    # Check environment variables that might indicate the IDE
+    if os.getenv("VSCODE_PID") or os.getenv("VSCODE_CWD"):
+        return IDEType.VSCODE
+    
+    if os.getenv("CURSOR_PID"):
+        return IDEType.CURSOR
+    
+    # Check for Windsurf-specific indicators
+    if os.getenv("WINDSURF_PID") or os.getenv("CODEIUM_PID"):
+        return IDEType.WINDSURF
+    
+    # Fallback: check which IDE's settings directory exists
+    ide_mgr = get_ide_manager()
+    installed = ide_mgr.detect_installed_ides()
+    
+    # Return the first installed IDE as a guess
+    if installed:
+        return installed[0]
+    
+    return None
+
+
+def get_current_ide() -> IDEType:
+    """
+    Get the current IDE (detected or user-specified).
+    
+    Returns:
+        Current IDE type, defaults to VS Code if cannot determine
+    """
+    global _current_ide
+    
+    if _current_ide is None:
+        _current_ide = detect_current_ide()
+    
+    # Default to VS Code if still None
+    if _current_ide is None:
+        _current_ide = IDEType.VSCODE
+    
+    return _current_ide
+
+
+def set_current_ide(ide_type: IDEType):
+    """
+    Set the current IDE explicitly.
+    
+    Args:
+        ide_type: IDE type to use
+    """
+    global _current_ide
+    _current_ide = ide_type
+
+
+def get_ide_content_dir(ide_type: IDEType, profile_name: str) -> Path:
+    """
+    Get the content directory for a specific IDE and profile.
+    
+    Args:
+        ide_type: IDE type
+        profile_name: Profile name
+    
+    Returns:
+        Path to IDE-specific content directory
+    """
+    # IDE-specific base directories
+    ide_dirs = {
+        IDEType.VSCODE: Path.home() / "vscode-instructions",
+        IDEType.CURSOR: Path.home() / "cursor-instructions",
+        IDEType.WINDSURF: Path.home() / "windsurf-instructions",
     }
-}
+    
+    base_dir = ide_dirs.get(ide_type, Path.home() / f"{ide_type.value}-instructions")
+    return base_dir / profile_name
 
 
-def load_context_config() -> Dict[str, Any]:
-    """Load context configuration from file or return defaults"""
+def load_team_config() -> TeamConfig:
+    """Load team configuration from file or URL"""
+    global _current_config
+    
     config_source = CONFIG_FILE
     
     try:
         if config_source.startswith(('http://', 'https://')):
-            # Remote config file - use synchronous HTTP client to avoid async issues
-            try:
-                headers = {}
-                if GITHUB_TOKEN and "github.com" in config_source:
-                    headers["Authorization"] = f"token {GITHUB_TOKEN}"
-                
-                with httpx.Client(follow_redirects=True) as client:
-                    response = client.get(config_source, headers=headers, timeout=30.0)
-                    response.raise_for_status()
-                    content = response.text
-                    config = yaml.safe_load(content)
-                    if 'profiles' in config:
-                        return config
-                    else:
-                        return DEFAULT_CONTEXTS
-            except Exception as e:
-                logger.error(f"Failed to fetch remote config: {e}")
-                return DEFAULT_CONTEXTS
+            # Remote config file
+            headers = {}
+            if GITHUB_TOKEN and "github.com" in config_source:
+                headers["Authorization"] = f"token {GITHUB_TOKEN}"
+            
+            with httpx.Client(follow_redirects=True) as client:
+                response = client.get(config_source, headers=headers, timeout=5.0)
+                response.raise_for_status()
+                content = response.text
+                config = ConfigLoader.load_from_string(content)
         else:
             # Local config file
             config_path = Path(config_source)
             if config_path.exists():
-                with open(config_path, 'r') as f:
-                    content = f.read()
-                    config = yaml.safe_load(content)
-                    if 'profiles' in config:
-                        return config
-                    else:
-                        return DEFAULT_CONTEXTS
+                config = ConfigLoader.load_from_file(config_path)
             else:
-                return DEFAULT_CONTEXTS
-    except Exception as e:
-        logger.warning(f"Failed to load config from {config_source}: {e}")
-        return DEFAULT_CONTEXTS
-
-
-async def _fetch_remote_config(url: str) -> Optional[str]:
-    """Helper function to fetch remote config file with retry logic"""
-    import ssl
-    
-    # Create SSL context that's more permissive
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-    }
-    if GITHUB_TOKEN and "github.com" in url:
-        headers["Authorization"] = f"token {GITHUB_TOKEN}"
-    
-    # Retry logic
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            # Try with different HTTP client configurations
-            timeout = httpx.Timeout(30.0, connect=10.0)
+                # Create default config
+                config = create_default_config()
+                ConfigLoader.save_to_file(config, config_path)
+                logger.info(f"Created default configuration at {config_path}")
+        
+        if config:
+            _current_config = config
+            return config
+        else:
+            return create_default_config()
             
-            async with httpx.AsyncClient(
-                follow_redirects=True,
-                timeout=timeout,
-                verify=False,  # Disable SSL verification
-                headers=headers
-            ) as client:
-                response = await client.get(url)
+    except Exception as e:
+        logger.error(f"Failed to load config from {config_source}: {e}")
+        return create_default_config()
+
+
+def create_default_config() -> TeamConfig:
+    """Create a default team configuration"""
+    from schemas import Profile, SecurityConfig, SecurityLevel
+    
+    default_profile = Profile(
+        name="default",
+        active=True,
+        description="Default profile",
+        instructions=[],
+        rules=[],
+        workflows=[],
+        prompts=[],
+        mcp_servers=[],
+        security=SecurityConfig(
+            enabled=True,
+            level=SecurityLevel.BASIC,
+        ),
+    )
+    
+    return TeamConfig(
+        version="1.0.0",
+        team_name="default",
+        profiles={"default": default_profile},
+        global_security=SecurityConfig(enabled=True, level=SecurityLevel.BASIC),
+        supported_ides=[IDEType.VSCODE, IDEType.CURSOR, IDEType.WINDSURF],
+    )
+
+
+async def fetch_content_from_source(
+    source,
+    content_type: ContentType,
+    profile_name: str
+) -> List[Dict[str, Any]]:
+    """
+    Fetch content from a remote source
+    
+    Args:
+        source: RemoteSource object
+        content_type: Type of content being fetched
+        profile_name: Profile name for organization
+    
+    Returns:
+        List of fetched content with metadata
+    """
+    fetched_items = []
+    repo_manager = get_repo_manager()
+    
+    try:
+        if source.repo:
+            # Git repository source
+            token = os.getenv(source.token_env_var) if source.token_env_var else GITHUB_TOKEN
+            repo_url = f"https://github.com/{source.repo}"
+            
+            repo = repo_manager.clone_or_update_repo(
+                repo_url,
+                source.branch,
+                token
+            )
+            
+            if repo:
+                files = repo_manager.get_files_from_repo(repo, source.paths)
+                
+                for file_path in files:
+                    content = file_path.read_text(encoding='utf-8')
+                    
+                    # Validate content security
+                    validator = get_security_validator(_current_config)
+                    is_valid, violations = validator.validate_content(
+                        content,
+                        str(file_path),
+                        content_type.value
+                    )
+                    
+                    fetched_items.append({
+                        "source": str(file_path),
+                        "content": content,
+                        "size": len(content),
+                        "security_valid": is_valid,
+                        "security_violations": len(violations),
+                        "repo": source.repo,
+                        "branch": source.branch,
+                    })
+        
+        elif source.url:
+            # Direct URL source
+            headers = {}
+            if GITHUB_TOKEN and "github.com" in source.url:
+                headers["Authorization"] = f"token {GITHUB_TOKEN}"
+            
+            async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
+                response = await client.get(source.url, headers=headers, timeout=30.0)
                 response.raise_for_status()
                 content = response.text
-                return content
                 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error {e.response.status_code} fetching remote config: {e}")
-            if e.response.status_code >= 400:
-                break  # Don't retry for client errors
-        except (httpx.ConnectError, httpx.TimeoutException, ssl.SSLError) as e:
-            logger.warning(f"Connection error on attempt {attempt + 1}: {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)  # Exponential backoff
-        except Exception as e:
-            logger.error(f"Unexpected error fetching remote config: {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
+                # Validate content security
+                validator = get_security_validator(_current_config)
+                is_valid, violations = validator.validate_content(
+                    content,
+                    source.url,
+                    content_type.value
+                )
+                
+                fetched_items.append({
+                    "source": source.url,
+                    "content": content,
+                    "size": len(content),
+                    "security_valid": is_valid,
+                    "security_violations": len(violations),
+                })
     
-    logger.error(f"Failed to fetch remote config from {url} after {max_retries} attempts")
-    return None
-
-
-def resolve_repository_urls(
-    repo_config: Union[str, Dict[str, Any]]
-) -> List[str]:
-    """Resolve repository configuration to actual URLs"""
-    if isinstance(repo_config, str):
-        return [repo_config]
-    
-    if isinstance(repo_config, dict) and "repo" in repo_config:
-        repo = repo_config["repo"]
-        branch = repo_config.get("branch", "main")
-        paths = repo_config.get("paths", ["*.md"])
-        
-        # Check if any paths contain wildcards
-        has_wildcards = any("*" in path for path in paths)
-        
-        if has_wildcards and GITHUB_TOKEN:
-            # Use async wildcard expansion
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    logger.warning(f"Cannot expand wildcards for {repo}")
-                    return _generate_basic_urls(repo, branch, paths)
-                else:
-                    return loop.run_until_complete(
-                        fetch_github_files_with_wildcards(repo, branch, paths)
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to expand wildcards for {repo}: {e}")
-                return _generate_basic_urls(repo, branch, paths)
-        else:
-            return _generate_basic_urls(repo, branch, paths)
-    
-    return []
-
-
-def _generate_basic_urls(repo: str, branch: str, paths: List[str]) -> List[str]:
-    """Generate basic GitHub raw URLs without wildcard expansion"""
-    urls = []
-    for path in paths:
-        if "*" in path:
-            # For wildcard patterns, create a general URL
-            base_path = path.replace("*", "").replace(".", "")
-            url = f"https://raw.githubusercontent.com/{repo}/{branch}/{base_path}"
-            urls.append(url)
-        else:
-            url = f"https://raw.githubusercontent.com/{repo}/{branch}/{path}"
-            urls.append(url)
-    return urls
-
-
-def get_instruction_urls_for_profile(
-    profile_name: str,
-    config: Optional[Dict[str, Any]] = None
-) -> List[str]:
-    """Get instruction URLs for a specific profile"""
-    if config is None:
-        config = load_context_config()
-    
-    profiles = config.get("profiles", {})
-    if profile_name not in profiles:
-        return []
-    
-    profile_config = profiles[profile_name]
-    instruction_configs = profile_config.get("instructions", [])
-    
-    urls = set()
-    for item in instruction_configs:
-        urls.update(resolve_repository_urls(item))
-    
-    return list(urls)
-
-
-def save_context_config(config: Dict[str, Any]) -> None:
-    """Save context configuration to file"""
-    try:
-        with open(CONFIG_FILE, 'w') as f:
-            yaml.dump(config, f, default_flow_style=False)
-        logger.info(f"Context configuration saved to {CONFIG_FILE}")
     except Exception as e:
-        logger.error(f"Failed to save config file {CONFIG_FILE}: {e}")
-
-
-async def fetch_remote_content(
-    url: str,
-    save_to_directory: Optional[Path] = None,
-    profile_name: str = "default"
-) -> Optional[str]:
-    """
-    Fetch content from a remote URL and optionally save to directory.
+        logger.error(f"Failed to fetch content from source: {e}")
     
-    Args:
-        url: URL to fetch content from
-        save_to_directory: Directory to save the file to (if provided)
-        profile_name: Profile name for unique file naming
-    
-    Returns:
-        Content string if successful, file path if saved, None if failed
-    """
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-        }
-        if GITHUB_TOKEN and "github.com" in url:
-            headers["Authorization"] = f"token {GITHUB_TOKEN}"
-        
-        timeout = httpx.Timeout(30.0, connect=10.0)
-        async with httpx.AsyncClient(
-            follow_redirects=True, 
-            timeout=timeout, 
-            verify=False  # Disable SSL verification to avoid SSL errors
-        ) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            content = response.text
-        
-        # If save_to_directory is provided, save the file
-        if save_to_directory:
-            base_filename = url.split("/")[-1]
-            
-            # Remove existing extensions
-            if base_filename.endswith((".md", ".txt")):
-                base_filename = base_filename.rsplit(".", 1)[0]
-            
-            # Generate profile-specific filename
-            filename = f"{base_filename}.instructions.md"
-            
-            file_path = save_to_directory / filename
-            save_to_directory.mkdir(parents=True, exist_ok=True)
-            
-            async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
-                await f.write(content)
-            
-            return str(file_path)  # Return file path when saved
-        
-        return content
-        
-    except Exception as e:
-        logger.error(f"Failed to fetch content from {url}: {e}")
-        return None
+    return fetched_items
 
 
-async def fetch_github_files_with_wildcards(
-    repo: str,
-    branch: str,
-    path_patterns: List[str]
-) -> List[str]:
-    """
-    Fetch file URLs from GitHub repository using wildcard patterns
-    
-    Args:
-        repo: GitHub repository in format "owner/repo"
-        branch: Branch name
-        path_patterns: List of path patterns with wildcards
-    
-    Returns:
-        List of raw GitHub URLs matching the patterns
-    """
-    urls = []
-    
-    if not GITHUB_TOKEN:
-        logger.warning("GitHub token not available for wildcard expansion")
-        return urls
-    
-    try:
-        headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-        
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            for pattern in path_patterns:
-                if "*" in pattern:
-                    # Use GitHub API to search for files
-                    api_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
-                    response = await client.get(api_url, headers=headers, timeout=30.0)
-                    response.raise_for_status()
-                    
-                    tree_data = response.json()
-                    for item in tree_data.get("tree", []):
-                        if item["type"] == "blob":
-                            file_path = item["path"]
-                            # Simple wildcard matching
-                            if _matches_pattern(file_path, pattern):
-                                raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{file_path}"
-                                urls.append(raw_url)
-                else:
-                    # Direct file path
-                    raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{pattern}"
-                    urls.append(raw_url)
-                    
-    except Exception as e:
-        logger.error(f"Failed to expand GitHub wildcards for {repo}: {e}")
-    
-    return urls
-
-
-def _matches_pattern(file_path: str, pattern: str) -> bool:
-    """Simple wildcard pattern matching"""
-    return fnmatch.fnmatch(file_path, pattern)
-
-
-def get_active_profile(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Get the active profile configuration"""
-    profiles = config.get("profiles", {})
-    
-    for profile_name, profile_config in profiles.items():
-        if profile_config.get("active", False):
-            return {
-                "name": profile_name,
-                "config": profile_config,
-                "directory": INSTRUCTIONS_DIR / profile_name
-            }
-    
-    # Default fallback - use first profile if none active
-    first_profile = next(iter(profiles.keys()), "default")
-    first_config = profiles.get(first_profile, {"instructions": []})
-    return {
-        "name": first_profile,
-        "config": first_config,
-        "directory": INSTRUCTIONS_DIR / first_profile
-    }
-
-
-def get_all_profiles(config: Dict[str, Any]) -> List[str]:
-    """Get all available profiles"""
-    profiles = config.get("profiles", {})
-    return list(profiles.keys())
-
-
-def update_user_settings(profile_directories: Dict[str, bool]) -> None:
-    """Update VS Code user settings with instruction directories"""
-    try:
-        # Get VS Code user settings path
-        if sys.platform == "darwin":  # macOS
-            settings_path = Path.home() / "Library/Application Support/Code/User/settings.json"
-        elif sys.platform == "win32":  # Windows
-            settings_path = Path.home() / "AppData/Roaming/Code/User/settings.json"
-        else:  # Linux
-            settings_path = Path.home() / ".config/Code/User/settings.json"
-        
-        settings = {}
-        if settings_path.exists():
-            with open(settings_path, 'r') as f:
-                content = f.read()
-                if content.strip():
-                    settings = json.loads(content)
-        
-        # Update instruction locations
-        settings["chat.instructionsFilesLocations"] = profile_directories
-        
-        # Ensure directory exists
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Write updated settings
-        with open(settings_path, 'w') as f:
-            json.dump(settings, f, indent=4)
-        
-        logger.info(f"Updated VS Code user settings at {settings_path}")
-        
-    except Exception as e:
-        logger.error(f"Failed to update user settings: {e}")
-
+# ============================================================================
+# MCP TOOLS - New comprehensive tools for team configuration management
+# ============================================================================
 
 @mcp.tool()
-async def fetch_and_sync_instructions(profile_name: Optional[str] = None) -> str:
+async def sync_team_config(
+    profile_name: Optional[str] = None,
+    force_update: bool = False,
+    sync_to_ides: bool = True
+) -> str:
     """
-    Fetch and sync instruction files for a profile.
-
-    Note: If switching between profiles, start a NEW CHAT conversation
-    for the updated instructions to take effect properly.
-
+    Sync team configuration from central repository and update all IDEs.
+    
+    This is the main tool to fetch and apply team configurations including:
+    - Instructions (AI guidance files)
+    - Rules (coding standards)
+    - Workflows (development processes)
+    - Prompts (reusable AI prompts)
+    - MCP server configurations
+    
+    Files are saved to IDE-specific directories:
+    - VS Code: ~/vscode-instructions/{profile}/
+    - Cursor: ~/cursor-instructions/{profile}/
+    - Windsurf: ~/windsurf-instructions/{profile}/
+    
     Args:
         profile_name: Profile to sync (uses active profile if None)
-
-    Returns:
-        JSON response indicating success or failure
-    """
-    try:
-        config = load_context_config()
-        
-        if profile_name is None:
-            active_profile = get_active_profile(config)
-            profile_name = active_profile["name"]
-        
-        profiles = config.get("profiles", {})
-        if profile_name not in profiles:
-            return json.dumps({
-                "success": False,
-                "error": f"Profile '{profile_name}' not found"
-            })
-        
-        # Get instruction URLs for the profile
-        instruction_urls = get_instruction_urls_for_profile(profile_name, config)
-        
-        if not instruction_urls:
-            return json.dumps({
-                "success": True,
-                "message": f"No instruction URLs configured for profile '{profile_name}'",
-                "synced_files": []
-            })
-        
-        # Create profile directory
-        profile_dir = INSTRUCTIONS_DIR / profile_name
-        profile_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Fetch and save instructions
-        synced_files = []
-        failed_urls = []
-        
-        for url in instruction_urls:
-            file_path = await fetch_remote_content(
-                url, profile_dir, profile_name
-            )
-            if file_path:
-                synced_files.append(file_path)
-            else:
-                failed_urls.append(url)
-        
-        # Update user settings with all profile directories
-        profile_directories = {}
-        for prof_name in profiles.keys():
-            prof_dir = str(INSTRUCTIONS_DIR / prof_name)
-            profile_directories[prof_dir] = profiles[prof_name].get("active", False)
-        
-        update_user_settings(profile_directories)
-        
-        return json.dumps({
-            "success": True,
-            "message": f"Synced instructions for profile '{profile_name}'",
-            "synced_files": synced_files,
-            "failed_urls": failed_urls,
-            "profile_directory": str(profile_dir)
-        })
-        
-    except Exception as e:
-        logger.error(f"Error syncing instructions: {e}")
-        return json.dumps({
-            "success": False,
-            "error": str(e)
-        })
-
-
-@mcp.tool()
-async def get_available_profiles() -> str:
-    """
-    Get all available profiles and their configurations.
+        force_update: Force pull from remote even if recently updated
+        sync_to_ides: Sync to all detected IDEs (Windsurf, Cursor, VS Code)
     
     Returns:
-        JSON response with available profiles
+        JSON response with sync results and any security issues
+    """
+    from mcp_tools import sync_profile_tool
+    
+    config = load_team_config()
+    ide_manager = get_ide_manager()
+    current_ide = get_current_ide()
+    
+    return await sync_profile_tool(
+        profile_name,
+        config,
+        CONTENT_DIR,
+        ide_manager,
+        fetch_content_from_source,
+        WORKSPACE_DIR if sync_to_ides else None,
+        current_ide,
+        get_ide_content_dir
+    )
+
+
+@mcp.tool()
+async def cleanup_profile_rules(profile_name: Optional[str] = None) -> str:
+    """
+    Clean up rule files from IDEs for a specific profile.
+    
+    This removes all managed rule files that were synced by the profile.
+    Useful when deactivating a profile without switching to another one.
+    
+    Args:
+        profile_name: Profile name to cleanup (uses active profile if None)
+    
+    Returns:
+        JSON response with cleanup results
     """
     try:
-        config = load_context_config()
-        profiles = config.get("profiles", {})
+        config = load_team_config()
+        ide_manager = get_ide_manager()
         
-        profile_info = {}
-        for profile_name, profile_config in profiles.items():
-            profile_info[profile_name] = {
-                "active": profile_config.get("active", False),
-                "directory": str(INSTRUCTIONS_DIR / profile_name),
-                "instruction_count": len(profile_config.get("instructions", []))
+        # Find profile
+        if profile_name is None:
+            active_profiles = [p for p in config.profiles.values() if p.active]
+            if not active_profiles:
+                return json.dumps({
+                    "success": False,
+                    "error": "No active profile found"
+                })
+            profile_name = active_profiles[0].name
+        else:
+            if profile_name not in config.profiles:
+                return json.dumps({
+                    "success": False,
+                    "error": f"Profile '{profile_name}' not found",
+                    "available_profiles": list(config.profiles.keys())
+                })
+        
+        # Cleanup rules from all IDEs
+        cleanup_results = ide_manager.cleanup_all_ides(
+            profile_name,
+            WORKSPACE_DIR
+        )
+        
+        return json.dumps({
+            "success": True,
+            "profile": profile_name,
+            "cleanup_results": {ide.value: success for ide, success in cleanup_results.items()},
+            "message": f"Cleaned up rules for profile '{profile_name}'"
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up profile rules: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def list_profiles() -> str:
+    """
+    List all available configuration profiles.
+    
+    Shows:
+    - Profile names
+    - Active status
+    - Content sources (instructions, rules, workflows, prompts)
+    - Security settings
+    - MCP servers configured
+    
+    Returns:
+        JSON response with all profiles and their configurations
+    """
+    try:
+        config = load_team_config()
+        
+        profiles_info = {}
+        for name, profile in config.profiles.items():
+            profiles_info[name] = {
+                "active": profile.active,
+                "description": profile.description,
+                "content_sources": {
+                    "instructions": len(profile.instructions),
+                    "rules": len(profile.rules),
+                    "workflows": len(profile.workflows),
+                    "prompts": len(profile.prompts)
+                },
+                "mcp_servers": [
+                    {"name": s.name, "enabled": s.enabled, "description": s.description}
+                    for s in profile.mcp_servers
+                ],
+                "security_level": profile.security.level.value,
+                "tags": profile.tags
             }
         
         return json.dumps({
             "success": True,
-            "profiles": profile_info,
-            "instructions_base_dir": str(INSTRUCTIONS_DIR)
-        })
+            "team_name": config.team_name,
+            "profiles": profiles_info,
+            "content_directory": str(CONTENT_DIR)
+        }, indent=2)
         
     except Exception as e:
-        logger.error(f"Error getting available profiles: {e}")
-        return json.dumps({"error": str(e)})
+        logger.error(f"Error listing profiles: {e}")
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
-async def set_active_profile(profile_name: str) -> str:
+async def set_active_profile(profile_name: str, auto_sync: bool = True) -> str:
     """
-    Set the active profile.
-
-    IMPORTANT: After switching profiles, start a NEW CHAT conversation
-    to use the new instructions effectively, or manually tell Copilot
-    to ignore previous context from the old profile.
-
+    Set the active configuration profile.
+    
     Args:
-        profile_name: Name of the profile to activate
-
+        profile_name: Name of profile to activate
+        auto_sync: Automatically sync the profile after activation
+    
     Returns:
         JSON response indicating success or failure
     """
     try:
-        config = load_context_config()
-        profiles = config.get("profiles", {})
+        config = load_team_config()
+        ide_manager = get_ide_manager()
         
-        if profile_name not in profiles:
-            available_profiles = list(profiles.keys())
+        if profile_name not in config.profiles:
             return json.dumps({
                 "success": False,
-                "error": f"Profile '{profile_name}' not found. Available profiles: {available_profiles}"
+                "error": f"Profile '{profile_name}' not found",
+                "available_profiles": list(config.profiles.keys())
             })
         
+        # Find currently active profile to cleanup
+        previously_active = None
+        for name, profile in config.profiles.items():
+            if profile.active:
+                previously_active = name
+                break
+        
+        # Cleanup previously active profile rules
+        cleanup_results = {}
+        if previously_active and previously_active != profile_name:
+            logger.info(f"Cleaning up rules from previous profile: {previously_active}")
+            cleanup_results = ide_manager.cleanup_all_ides(
+                previously_active,
+                WORKSPACE_DIR
+            )
+        
         # Deactivate all profiles
-        for name, profile_config in profiles.items():
-            profile_config["active"] = False
+        for profile in config.profiles.values():
+            profile.active = False
         
-        # Activate the requested profile
-        profiles[profile_name]["active"] = True
+        # Activate requested profile
+        config.profiles[profile_name].active = True
         
-        # Save updated configuration
-        save_context_config(config)
+        # Save config
+        config_path = Path(CONFIG_FILE)
+        if not CONFIG_FILE.startswith(('http://', 'https://')):
+            ConfigLoader.save_to_file(config, config_path)
         
-        # Update user settings with all profile directories
-        profile_directories = {}
-        for prof_name in profiles.keys():
-            prof_dir = str(INSTRUCTIONS_DIR / prof_name)
-            profile_directories[prof_dir] = profiles[prof_name].get("active", False)
-        
-        update_user_settings(profile_directories)
-        
-        return json.dumps({
+        response = {
             "success": True,
             "message": f"Profile '{profile_name}' activated",
-            "active_profile": {
-                "name": profile_name,
-                "directory": str(INSTRUCTIONS_DIR / profile_name)
-            }
-        })
+            "profile": profile_name,
+            "previous_profile": previously_active,
+            "cleanup_results": {ide.value: success for ide, success in cleanup_results.items()} if cleanup_results else {}
+        }
+        
+        # Auto-sync if requested
+        if auto_sync:
+            sync_result = await sync_team_config(profile_name)
+            response["sync_result"] = json.loads(sync_result)
+        
+        return json.dumps(response, indent=2)
         
     except Exception as e:
         logger.error(f"Error setting active profile: {e}")
-        return json.dumps({"error": str(e)})
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
-async def list_context_config() -> str:
+async def check_for_updates() -> str:
     """
-    List the current context configuration showing all profiles and their instructions.
-
+    Check if central repository has updates without pulling them.
+    
+    Useful for monitoring changes before applying them.
+    
     Returns:
-        JSON string with the complete context configuration
+        JSON response with update status for each profile's central repo
     """
     try:
-        config = load_context_config()
-        return json.dumps(config, indent=2)
+        config = load_team_config()
+        repo_manager = get_repo_manager()
+        
+        updates = {}
+        
+        for name, profile in config.profiles.items():
+            if profile.central_repo and profile.central_repo.repo:
+                repo_url = f"https://github.com/{profile.central_repo.repo}"
+                token = os.getenv(profile.central_repo.token_env_var) if profile.central_repo.token_env_var else GITHUB_TOKEN
+                
+                has_updates, latest_commit = repo_manager.check_for_updates(
+                    repo_url,
+                    profile.central_repo.branch,
+                    token
+                )
+                
+                updates[name] = {
+                    "has_updates": has_updates,
+                    "latest_commit": latest_commit,
+                    "repo": profile.central_repo.repo,
+                    "branch": profile.central_repo.branch
+                }
+        
+        return json.dumps({
+            "success": True,
+            "updates": updates,
+            "checked_at": datetime.now().isoformat()
+        }, indent=2)
+        
     except Exception as e:
-        logger.error(f"Error listing context config: {e}")
-        return json.dumps({"error": str(e)})
+        logger.error(f"Error checking for updates: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def validate_content_security(
+    content: str,
+    content_type: str = "general",
+    filename: str = "unknown"
+) -> str:
+    """
+    Validate content for security issues before using it.
+    
+    Scans for:
+    - Secrets (API keys, tokens, passwords)
+    - PII (emails, SSNs, phone numbers)
+    - Forbidden patterns
+    - Dangerous code patterns
+    
+    Args:
+        content: Content to validate
+        content_type: Type of content (instruction, rule, workflow, prompt, general)
+        filename: Name of file being validated
+    
+    Returns:
+        JSON response with validation results and violations
+    """
+    try:
+        config = load_team_config()
+        validator = get_security_validator(config)
+        
+        is_valid, violations = validator.validate_content(content, filename, content_type)
+        
+        violations_data = [
+            {
+                "severity": v.severity,
+                "category": v.category,
+                "message": v.message,
+                "line_number": v.line_number,
+                "suggestion": v.suggestion
+            }
+            for v in violations
+        ]
+        
+        return json.dumps({
+            "success": True,
+            "is_valid": is_valid,
+            "violations_count": len(violations),
+            "violations": violations_data,
+            "security_level": config.global_security.level.value
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error validating content: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def update_mcp_servers(
+    profile_name: Optional[str] = None,
+    reload: bool = True
+) -> str:
+    """
+    Update MCP server configurations for active profile.
+    
+    Applies MCP server settings from profile to workspace configuration.
+    
+    Args:
+        profile_name: Profile to use (uses active if None)
+        reload: Reload IDE after updating (requires IDE restart)
+    
+    Returns:
+        JSON response with update results
+    """
+    try:
+        config = load_team_config()
+        ide_manager = get_ide_manager()
+        
+        # Find profile
+        if profile_name is None:
+            active_profiles = [p for p in config.profiles.values() if p.active]
+            if not active_profiles:
+                return json.dumps({"success": False, "error": "No active profile"})
+            profile = active_profiles[0]
+        else:
+            if profile_name not in config.profiles:
+                return json.dumps({"success": False, "error": f"Profile '{profile_name}' not found"})
+            profile = config.profiles[profile_name]
+        
+        # Update MCP servers for all IDEs
+        results = {}
+        for ide_type in config.supported_ides:
+            success = ide_manager.update_mcp_servers(
+                ide_type,
+                profile.mcp_servers,
+                WORKSPACE_DIR,
+                merge=True,  # Merge with existing servers, preserve manually configured ones
+                profile_name=profile.name  # Track which profile manages these servers
+            )
+            results[ide_type.value] = success
+        
+        return json.dumps({
+            "success": True,
+            "profile": profile.name,
+            "mcp_servers_configured": len(profile.mcp_servers),
+            "ide_updates": results,
+            "reload_required": reload
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error updating MCP servers: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def list_installed_ides() -> str:
+    """
+    Detect which IDEs are installed on this system.
+    
+    Checks for:
+    - VS Code
+    - Cursor
+    - Windsurf
+    
+    Returns:
+        JSON response with installed IDEs and their settings paths
+    """
+    try:
+        ide_manager = get_ide_manager()
+        installed = ide_manager.detect_installed_ides()
+        
+        # Get current IDE
+        current_ide = get_current_ide()
+        detected_ide = detect_current_ide()
+        
+        ide_info = {}
+        for ide_type in installed:
+            settings_path = ide_manager.get_settings_path(ide_type)
+            mcp_path = ide_manager.get_mcp_config_path(ide_type, WORKSPACE_DIR)
+            
+            ide_info[ide_type.value] = {
+                "installed": True,
+                "is_current": ide_type == current_ide,
+                "is_detected": ide_type == detected_ide,
+                "settings_path": str(settings_path),
+                "mcp_config_path": str(mcp_path) if mcp_path else None,
+                "settings_exists": settings_path.exists(),
+                "instructions_dir": str(get_ide_content_dir(ide_type, "default"))
+            }
+        
+        return json.dumps({
+            "success": True,
+            "current_ide": current_ide.value,
+            "detected_ide": detected_ide.value if detected_ide else "unknown",
+            "installed_ides": [ide.value for ide in installed],
+            "ide_details": ide_info
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error listing IDEs: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def get_current_ide_info() -> str:
+    """
+    Get information about the currently active IDE.
+    
+    This tool automatically detects which IDE is running the MCP server
+    or uses the IDE that was explicitly set.
+    
+    Returns:
+        JSON response with current IDE information
+    """
+    try:
+        current_ide = get_current_ide()
+        detected_ide = detect_current_ide()
+        
+        ide_manager = get_ide_manager()
+        settings_path = ide_manager.get_settings_path(current_ide)
+        
+        return json.dumps({
+            "success": True,
+            "current_ide": current_ide.value,
+            "detected_ide": detected_ide.value if detected_ide else "unknown",
+            "auto_detected": detected_ide is not None,
+            "settings_path": str(settings_path),
+            "instructions_dir": str(get_ide_content_dir(current_ide, "default")),
+            "instructions_dirs": {
+                "vscode": str(get_ide_content_dir(IDEType.VSCODE, "default")),
+                "cursor": str(get_ide_content_dir(IDEType.CURSOR, "default")),
+                "windsurf": str(get_ide_content_dir(IDEType.WINDSURF, "default"))
+            }
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error getting current IDE: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def set_ide(ide_name: str) -> str:
+    """
+    Explicitly set which IDE you're using.
+    
+    Use this if auto-detection doesn't work or you want to override it.
+    
+    Args:
+        ide_name: IDE to use ("vscode", "cursor", or "windsurf")
+    
+    Returns:
+        JSON response with updated IDE setting
+    """
+    try:
+        # Convert string to IDEType
+        ide_name_lower = ide_name.lower()
+        ide_map = {
+            "vscode": IDEType.VSCODE,
+            "vs code": IDEType.VSCODE,
+            "cursor": IDEType.CURSOR,
+            "windsurf": IDEType.WINDSURF,
+            "cascade": IDEType.WINDSURF
+        }
+        
+        if ide_name_lower not in ide_map:
+            return json.dumps({
+                "success": False,
+                "error": f"Unknown IDE: {ide_name}",
+                "available_ides": list(set(ide_map.keys()))
+            })
+        
+        ide_type = ide_map[ide_name_lower]
+        set_current_ide(ide_type)
+        
+        return json.dumps({
+            "success": True,
+            "message": f"IDE set to {ide_type.value}",
+            "current_ide": ide_type.value,
+            "instructions_dir": str(get_ide_content_dir(ide_type, "default"))
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error setting IDE: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def get_config() -> str:
+    """
+    Get the complete team configuration.
+    
+    Returns:
+        JSON response with full configuration
+    """
+    try:
+        config = load_team_config()
+        config_dict = ConfigLoader.config_to_dict(config)
+        
+        return json.dumps({
+            "success": True,
+            "config": config_dict
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error getting config: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def reload_config() -> str:
+    """
+    Reload configuration from source (file or URL).
+    
+    Useful when configuration has been updated externally.
+    
+    Returns:
+        JSON response indicating success or failure
+    """
+    try:
+        global _current_config
+        _current_config = None  # Force reload
+        
+        config = load_team_config()
+        
+        return json.dumps({
+            "success": True,
+            "message": "Configuration reloaded",
+            "team_name": config.team_name,
+            "profiles_count": len(config.profiles),
+            "active_profile": next((p.name for p in config.profiles.values() if p.active), None)
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error reloading config: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+async def clear_cache(cache_type: str = "all") -> str:
+    """
+    Clear cached data.
+    
+    Args:
+        cache_type: Type of cache to clear (all, repos, content)
+    
+    Returns:
+        JSON response indicating what was cleared
+    """
+    try:
+        cleared = []
+        
+        if cache_type in ["all", "repos"]:
+            repo_manager = get_repo_manager()
+            repo_manager.clear_cache()
+            cleared.append("repositories")
+        
+        if cache_type in ["all", "content"]:
+            import shutil
+            if CONTENT_DIR.exists():
+                shutil.rmtree(CONTENT_DIR)
+                CONTENT_DIR.mkdir(parents=True, exist_ok=True)
+            cleared.append("content")
+        
+        return json.dumps({
+            "success": True,
+            "cleared": cleared,
+            "message": f"Cleared cache: {', '.join(cleared)}"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}")
+        return json.dumps({"success": False, "error": str(e)})
 
 
 def main():
-    """Main function to run the Instructions MCP server"""
-    logger.info("Starting Instructions MCP server...")
+    """Main function to run the Team Configuration MCP server"""
+    logger.info("=" * 70)
+    logger.info("Starting Team Configuration MCP Server")
+    logger.info("=" * 70)
     logger.info(f"Config file: {CONFIG_FILE}")
-    logger.info(f"Instructions directory: {INSTRUCTIONS_DIR}")
+    logger.info(f"Base directory: {BASE_DIR}")
+    logger.info(f"Content directory: {CONTENT_DIR}")
+    logger.info(f"Workspace directory: {WORKSPACE_DIR}")
     
-    # Test config loading and print what we get
-    logger.info("=" * 50)
-    logger.info("TESTING CONFIG LOADING:")
-    config = load_context_config()
-    logger.info(f"Loaded config: {json.dumps(config, indent=2)}")
-    logger.info("=" * 50)
+    # Try to load configuration (don't block on failure)
+    try:
+        # Use a shorter timeout for startup config check
+        config = load_team_config()
+        logger.info(f"Team: {config.team_name}")
+        logger.info(f"Profiles: {len(config.profiles)}")
+        active_profile = next((p.name for p in config.profiles.values() if p.active), None)
+        logger.info(f"Active profile: {active_profile or 'None'}")
+    except Exception as e:
+        logger.warning(f"Config load during startup failed: {e}")
+        logger.info("Using default configuration - config will be loaded on first tool use")
     
-    # Create instructions directory if it doesn't exist
-    INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info("=" * 70)
+    logger.info("MCP Server Ready")
+    logger.info("=" * 70)
     
-    # Create default config if it doesn't exist (only for local files)
-    if not CONFIG_FILE.startswith(('http://', 'https://')):
-        config_path = Path(CONFIG_FILE)
-        if not config_path.exists():
-            save_context_config(DEFAULT_CONTEXTS)
-            logger.info("Created default context configuration")
-    
+    # Run the server
     mcp.run()
-    logger.info("Instructions MCP server completed")
+    
+    logger.info("Team Configuration MCP server completed")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 [project]
-name = "mcp-get-remote-context"
-version = "0.1.0"
-description = "MCP server for fetching and managing remote context files for GitHub Copilot"
+name = "mcp-team-config"
+version = "2.0.0"
+description = "MCP server for managing team configurations across Windsurf, Cursor, and VS Code with centralized rules, workflows, and security"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.10.1",
     "httpx>=0.25.0",

@@ -1,0 +1,31 @@
+version: 1.0.0
+team_name: Test Team
+central_repo_url: null
+central_repo_branch: main
+auto_update: true
+update_check_interval_minutes: 30
+global_security:
+  enabled: true
+  level: basic
+supported_ides:
+- vscode
+- cursor
+- windsurf
+profiles:
+  default:
+    active: true
+    description: Default test profile
+    instructions: []
+    rules:
+    - repo: coley-angel/remote_context_mcp
+      paths:
+      - rules/python_pep8_camelcase.md
+      token_env_var: GITHUB_TOKEN
+    workflows: []
+    prompts: []
+    mcp_servers: []
+    security:
+      enabled: true
+      level: basic
+    tags:
+    - test

@@ -1,0 +1,288 @@
+# Team Configuration Example
+# This file demonstrates the full capabilities of the enhanced MCP server
+
+version: "1.0.0"
+team_name: "Engineering Team"
+
+# Central repository configuration
+central_repo_url: "https://github.com/your-org/team-configs"
+central_repo_branch: "main"
+auto_update: true
+update_check_interval_minutes: 30
+
+# Global security settings (applied to all profiles unless overridden)
+global_security:
+  enabled: true
+  level: "basic"  # none, basic, strict, paranoid
+  forbidden_patterns:
+    - "(?i)todo:?\\s*hack"
+    - "(?i)fixme:?\\s*security"
+    - "hardcoded.*password"
+  max_file_size_kb: 1024
+  scan_for_secrets: true
+  scan_for_pii: true
+  allowed_domains:
+    - "github.com"
+    - "githubusercontent.com"
+    - "company-internal.com"
+
+# Supported IDEs (will sync to these when installed)
+supported_ides:
+  - "vscode"
+  - "cursor"
+  - "windsurf"
+
+# Profiles for different teams/environments
+profiles:
+  
+  # Default profile for general development
+  default:
+    active: true
+    description: "General development profile with standard guidelines"
+    
+    # Instructions (general AI guidance)
+    instructions:
+      - url: "https://raw.githubusercontent.com/your-org/guidelines/main/general-instructions.md"
+      - repo: "your-org/dev-guidelines"
+        branch: "main"
+        paths: ["instructions/*.md"]
+        auto_pull: true
+    
+    # Rules (coding standards and guidelines)
+    rules:
+      - url: "https://raw.githubusercontent.com/your-org/guidelines/main/coding-rules.md"
+      - repo: "your-org/dev-guidelines"
+        branch: "main"
+        paths: ["rules/*.md"]
+    
+    # Workflows (development processes)
+    workflows:
+      - url: "https://raw.githubusercontent.com/your-org/workflows/main/pr-workflow.md"
+      - repo: "your-org/dev-guidelines"
+        branch: "main"
+        paths: ["workflows/*.md"]
+    
+    # Prompts (reusable AI prompts)
+    prompts:
+      - repo: "your-org/ai-prompts"
+        branch: "main"
+        paths: ["prompts/*.md"]
+    
+    # MCP servers configuration
+    mcp_servers:
+      - name: "github"
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-github"]
+        env:
+          GITHUB_TOKEN: "${GITHUB_TOKEN}"
+        enabled: true
+        auto_restart: true
+        description: "GitHub integration"
+      
+      - name: "filesystem"
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"]
+        enabled: true
+        description: "Local filesystem access"
+    
+    # IDE-specific overrides
+    ide_overrides:
+      vscode:
+        chat.experimental.rules: true
+        chat.experimental.workflows: true
+      cursor:
+        cursor.aiFeatures.enabled: true
+      windsurf:
+        windsurf.cascade.enabled: true
+    
+    # Security overrides for this profile
+    security:
+      enabled: true
+      level: "basic"
+    
+    # Central repository for this profile
+    central_repo:
+      repo: "your-org/team-configs"
+      branch: "main"
+      paths: ["profiles/default/**/*"]
+      auto_pull: true
+      pull_interval_minutes: 30
+    
+    tags:
+      - "development"
+      - "general"
+  
+  # Corporate/Production profile with strict security
+  corporate:
+    active: false
+    description: "Corporate environment with strict security controls"
+    
+    instructions:
+      - url: "https://internal.company.com/ai/corporate-guidelines.md"
+      - url: "https://internal.company.com/ai/security-guidelines.md"
+    
+    rules:
+      - url: "https://internal.company.com/rules/corporate-rules.md"
+      - url: "https://internal.company.com/rules/security-rules.md"
+      - url: "https://internal.company.com/rules/compliance-rules.md"
+    
+    workflows:
+      - url: "https://internal.company.com/workflows/approval-workflow.md"
+      - url: "https://internal.company.com/workflows/deployment-workflow.md"
+    
+    mcp_servers:
+      - name: "github"
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-github"]
+        env:
+          GITHUB_TOKEN: "${GITHUB_TOKEN}"
+        enabled: true
+      
+      # Disable filesystem access in corporate environment
+      - name: "filesystem"
+        enabled: false
+    
+    security:
+      enabled: true
+      level: "strict"
+      forbidden_patterns:
+        - "(?i)todo:?\\s*hack"
+        - "(?i)fixme:?\\s*security"
+        - "eval\\("
+        - "exec\\("
+        - "hardcoded.*password"
+      required_patterns:
+        - "# Security Review:"
+      scan_for_secrets: true
+      scan_for_pii: true
+      allowed_domains:
+        - "internal.company.com"
+        - "github.com"
+    
+    central_repo:
+      url: "https://internal.company.com/git/team-configs"
+      branch: "production"
+      token_env_var: "CORPORATE_GIT_TOKEN"
+      auto_pull: true
+      pull_interval_minutes: 15
+    
+    tags:
+      - "corporate"
+      - "production"
+      - "strict"
+  
+  # Development team profile
+  dev-team:
+    active: false
+    description: "Development team with specialized tools and workflows"
+    
+    instructions:
+      - repo: "your-org/dev-team-instructions"
+        branch: "main"
+        paths: ["*.md"]
+    
+    rules:
+      - repo: "your-org/dev-team-rules"
+        branch: "main"
+        paths: ["rules/*.md"]
+    
+    workflows:
+      - repo: "your-org/dev-workflows"
+        branch: "main"
+        paths: ["workflows/*.md", "templates/*.md"]
+    
+    prompts:
+      - repo: "your-org/dev-team-prompts"
+        branch: "main"
+        paths: ["prompts/**/*.md"]
+    
+    mcp_servers:
+      - name: "github"
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-github"]
+        env:
+          GITHUB_TOKEN: "${GITHUB_TOKEN}"
+        enabled: true
+      
+      - name: "filesystem"
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"]
+        enabled: true
+      
+      - name: "postgres"
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-postgres"]
+        env:
+          DATABASE_URL: "${DEV_DATABASE_URL}"
+        enabled: true
+        description: "Development database access"
+      
+      - name: "slack"
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-slack"]
+        env:
+          SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN}"
+        enabled: false
+    
+    security:
+      enabled: true
+      level: "basic"
+    
+    central_repo:
+      repo: "your-org/dev-team-config"
+      branch: "dev"
+      auto_pull: true
+      pull_interval_minutes: 30
+    
+    tags:
+      - "development"
+      - "team-specific"
+  
+  # Security team profile
+  security-team:
+    active: false
+    description: "Security team with enhanced scanning and paranoid settings"
+    
+    instructions:
+      - url: "https://internal.company.com/security/instructions.md"
+    
+    rules:
+      - url: "https://internal.company.com/security/rules.md"
+      - url: "https://internal.company.com/security/owasp-guidelines.md"
+    
+    workflows:
+      - url: "https://internal.company.com/security/security-review-workflow.md"
+      - url: "https://internal.company.com/security/incident-response.md"
+    
+    mcp_servers:
+      - name: "github"
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-github"]
+        env:
+          GITHUB_TOKEN: "${GITHUB_TOKEN}"
+        enabled: true
+    
+    security:
+      enabled: true
+      level: "paranoid"
+      forbidden_patterns:
+        - "eval\\("
+        - "exec\\("
+        - "os\\.system"
+        - "subprocess.*shell=True"
+        - "hardcoded.*password"
+        - "hardcoded.*secret"
+        - "hardcoded.*key"
+      scan_for_secrets: true
+      scan_for_pii: true
+      max_file_size_kb: 512
+      allowed_domains:
+        - "internal.company.com"
+    
+    tags:
+      - "security"
+      - "paranoid"
+
+# Metadata (automatically updated by the system)
+last_updated: null
+updated_by: null
