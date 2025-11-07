@@ -49,12 +49,44 @@ mcp = FastMCP("TeamConfigMCP")
 
 # Configuration
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+TEAM_CONFIG_REPO = os.getenv("TEAM_CONFIG_REPO")
+TEAM_CONFIG_BRANCH = os.getenv("TEAM_CONFIG_BRANCH", "main")
 CONFIG_FILE = os.getenv("TEAM_CONFIG_FILE", "team_config.yaml")
 WORKSPACE_DIR = Path(os.getenv("WORKSPACE_DIR", os.getcwd()))
 
-# Make CONFIG_FILE absolute if it's a relative path
-if not CONFIG_FILE.startswith(('http://', 'https://', '/')):
-    CONFIG_FILE = str(Path(__file__).parent / CONFIG_FILE)
+# Determine configuration source
+if TEAM_CONFIG_REPO:
+    # Build raw content URL from repository
+    repo_url = TEAM_CONFIG_REPO.rstrip('/').replace('.git', '')
+    
+    if "github.com" in repo_url:
+        # https://github.com/org/repo -> https://raw.githubusercontent.com/org/repo/branch/file
+        parts = repo_url.split('github.com/')[-1]
+        CONFIG_FILE = f"https://raw.githubusercontent.com/{parts}/{TEAM_CONFIG_BRANCH}/{CONFIG_FILE}"
+        logger.info(f"Loading config from GitHub: {CONFIG_FILE}")
+    
+    elif "gitlab.com" in repo_url:
+        # https://gitlab.com/org/repo -> https://gitlab.com/org/repo/-/raw/branch/file
+        parts = repo_url.split('gitlab.com/')[-1]
+        CONFIG_FILE = f"https://gitlab.com/{parts}/-/raw/{TEAM_CONFIG_BRANCH}/{CONFIG_FILE}"
+        logger.info(f"Loading config from GitLab: {CONFIG_FILE}")
+    
+    elif "bitbucket.org" in repo_url:
+        # https://bitbucket.org/org/repo -> https://bitbucket.org/org/repo/raw/branch/file
+        parts = repo_url.split('bitbucket.org/')[-1]
+        CONFIG_FILE = f"https://bitbucket.org/{parts}/raw/{TEAM_CONFIG_BRANCH}/{CONFIG_FILE}"
+        logger.info(f"Loading config from Bitbucket: {CONFIG_FILE}")
+    
+    else:
+        logger.warning(f"TEAM_CONFIG_REPO set but not a recognized Git hosting platform: {TEAM_CONFIG_REPO}")
+        logger.warning(f"Supported: GitHub, GitLab, Bitbucket")
+        # Fallback to local file
+        if not CONFIG_FILE.startswith(('http://', 'https://', '/')):
+            CONFIG_FILE = str(Path(__file__).parent / CONFIG_FILE)
+else:
+    # Make CONFIG_FILE absolute if it's a relative path
+    if not CONFIG_FILE.startswith(('http://', 'https://', '/')):
+        CONFIG_FILE = str(Path(__file__).parent / CONFIG_FILE)
 
 # Base directories - initially use default, will be updated based on config
 _BASE_DIR = None

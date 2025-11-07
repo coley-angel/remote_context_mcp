@@ -1,6 +1,6 @@
 version: 1.0.0
 team_name: Test Team
-central_repo_url: null
+central_repo_url: https://github.com/CiscoOpsStack/Ops_Stack_Dev_Profiles
 central_repo_branch: main
 auto_update: true
 update_check_interval_minutes: 30

@@ -14,6 +14,6 @@ wheels/
 .github/*.prompts.md
 
 # IDE configuration directories (workspace-specific)
-.vscode/
-.cursor/
-.windsurf/
+# .vscode/
+# .cursor/
+# .windsurf/

@@ -63,11 +63,55 @@ This allows the same IDE installation to work with multiple team configs.
 
 ### Environment Variables
 
+- **`TEAM_CONFIG_REPO`**: Remote Git repository URL for team configuration
+  - Example: `https://github.com/CiscoOpsStack/Ops_Stack_Dev_Profiles`
+  - Supports: GitHub, GitLab, Bitbucket
+  - If set, the server fetches `team_config.yaml` directly from the repository
+
+- **`TEAM_CONFIG_FILE`**: Configuration filename in the repository
+  - Default: `team_config.yaml`
+  - Example: `team_config.yaml`, `config.yaml`
+
+- **`TEAM_CONFIG_BRANCH`**: Git branch to fetch configuration from
+  - Default: `main`
+  - Example: `main`, `master`, `develop`
+
+- **`GITHUB_TOKEN`**: GitHub Personal Access Token for private repositories
+  - Required for private repositories
+  - Example: `github_pat_...`
+
 - **`MCP_BASE_DIR_ROOT`**: Override the base directory location
   - Default: `~/.mcp-team-config`
   - Example: `MCP_BASE_DIR_ROOT=/opt/team-configs`
 
 ### Example MCP Config
+
+#### Remote Configuration (Recommended)
+
+```json
+{
+  "mcpServers": {
+    "team-config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/remote_context_mcp",
+        "python",
+        "main.py"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "your_token",
+        "TEAM_CONFIG_REPO": "https://github.com/CiscoOpsStack/Ops_Stack_Dev_Profiles",
+        "TEAM_CONFIG_FILE": "team_config.yaml",
+        "TEAM_CONFIG_BRANCH": "main"
+      }
+    }
+  }
+}
+```
+
+#### Local Configuration
 
 ```json
 {
