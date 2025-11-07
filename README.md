@@ -86,8 +86,36 @@ profiles:
 
 - **`get_config`** - View current configuration
 - **`reload_config`** - Reload configuration from file
-- **`update_mcp_servers`** - Update MCP server configs
+- **`update_mcp_servers`** - Update MCP server configs (respects manual configs)
 - **`validate_content_security`** - Scan content for security issues
+
+### MCP Server Management
+
+The system intelligently manages MCP servers:
+- **Managed Servers**: Servers added by team-config have a `_managed_by: team-config` marker
+- **Manual Servers**: Servers without the marker are considered manually configured
+- **Protection**: Team-config will NOT modify or remove manually configured servers
+- **Override**: To let team-config manage a manual server, add `"_managed_by": "team-config"` to it
+
+**Example**: If your MCP config has:
+```json
+{
+  "mcpServers": {
+    "my-custom-server": {
+      "command": "node",
+      "args": ["./my-server.js"]
+      // No _managed_by marker - will NOT be touched by team-config
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "_managed_by": "team-config"  // Will be managed by team-config
+    }
+  }
+}
+```
+
+The team-config system will update/remove `github` but will never touch `my-custom-server`.
 
 ## Rules with Frontmatter
 

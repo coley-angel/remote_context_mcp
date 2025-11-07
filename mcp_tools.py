@@ -160,6 +160,13 @@ async def sync_profile_tool(
             if rule_path.exists():
                 rules_content[rule_path.name] = rule_path.read_text(encoding='utf-8')
         
+        # Prepare workflows content for IDE syncing
+        workflows_content = {}
+        for workflow_item in results.get("workflows", []):
+            workflow_path = Path(workflow_item["file"])
+            if workflow_path.exists():
+                workflows_content[workflow_path.name] = workflow_path.read_text(encoding='utf-8')
+        
         # Sync to current IDE only (or all if requested via workspace_dir being None)
         if current_ide and workspace_dir is not None:
             # Sync only to current IDE
@@ -169,7 +176,8 @@ async def sync_profile_tool(
                 profile.mcp_servers if profile.mcp_servers else None,
                 workspace_dir,
                 profile_name=profile_name,
-                rules_content=rules_content if rules_content else None
+                rules_content=rules_content if rules_content else None,
+                workflows_content=workflows_content if workflows_content else None
             )
             ide_sync_results = {current_ide: success}
         else:
@@ -179,7 +187,8 @@ async def sync_profile_tool(
                 profile.mcp_servers if profile.mcp_servers else None,
                 workspace_dir,
                 profile_name=profile_name,
-                rules_content=rules_content if rules_content else None
+                rules_content=rules_content if rules_content else None,
+                workflows_content=workflows_content if workflows_content else None
             )
         
         return json.dumps({

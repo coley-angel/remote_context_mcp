@@ -232,18 +232,18 @@ class IDEManager:
         Returns:
             Path to rules directory or None if not supported
         """
-        config = self.ide_configs[ide_type]
+        paths = self._getIdePaths(ide_type)
         
-        if not config.rules_path:
+        if not paths.rules_path:
             return None
         
         # Windsurf always uses global rules directory
         if ide_type == IDEType.WINDSURF:
-            return Path(config.rules_path).expanduser()
+            return Path(paths.rules_path).expanduser()
         
         # VS Code and Cursor use workspace-level rules
         if workspace_dir:
-            return workspace_dir / config.rules_path
+            return workspace_dir / paths.rules_path
         
         # No workspace provided for workspace-level IDEs
         return None
@@ -375,13 +375,19 @@ class IDEManager:
         Returns:
             True if successful, False otherwise
         """
-        rules_dir = self.get_rules_path(ide_type, workspace_dir)
+        rules_base_dir = self.get_rules_path(ide_type, workspace_dir)
         
-        if not rules_dir:
+        if not rules_base_dir:
             logger.warning(f"{ide_type.value} does not support rules directory")
             return False
         
         try:
+            # For Windsurf, use subdirectory structure
+            if ide_type == IDEType.WINDSURF and workspace_dir:
+                rules_dir = rules_base_dir / "rules"
+            else:
+                rules_dir = rules_base_dir
+            
             # Create rules directory
             rules_dir.mkdir(parents=True, exist_ok=True)
             
@@ -413,6 +419,53 @@ class IDEManager:
             return True
         except Exception as e:
             logger.error(f"Failed to sync rules to {ide_type.value}: {e}")
+            return False
+    
+    def sync_workflows_to_ide(
+        self,
+        ide_type: IDEType,
+        workflows_content: Dict[str, str],
+        workspace_dir: Optional[Path] = None,
+        profile_name: Optional[str] = None
+    ) -> bool:
+        """
+        Sync workflow files to IDE workflows directory
+        
+        Args:
+            ide_type: IDE type
+            workflows_content: Dictionary of {filename: content}
+            workspace_dir: Workspace directory
+            profile_name: Profile name for tracking
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        rules_base_dir = self.get_rules_path(ide_type, workspace_dir)
+        
+        if not rules_base_dir:
+            logger.warning(f"{ide_type.value} does not support workflows directory")
+            return False
+        
+        try:
+            # For Windsurf, use subdirectory structure
+            if ide_type == IDEType.WINDSURF and workspace_dir:
+                workflows_dir = rules_base_dir / "workflows"
+            else:
+                # For other IDEs, workflows can go in rules directory
+                workflows_dir = rules_base_dir
+            
+            # Create workflows directory
+            workflows_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Write workflow files
+            for filename, content in workflows_content.items():
+                workflow_file = workflows_dir / filename
+                workflow_file.write_text(content, encoding='utf-8')
+                logger.info(f"Synced workflow to {ide_type.value}: {workflow_file}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to sync workflows to {ide_type.value}: {e}")
             return False
     
     def update_instruction_locations(
@@ -555,18 +608,18 @@ class IDEManager:
         Returns:
             Path to MCP config file or None if not supported
         """
-        config = self.ide_configs[ide_type]
+        paths = self._getIdePaths(ide_type)
         
-        if not config.mcp_config_path:
+        if not paths.mcp_config_path:
             return None
         
         # Windsurf always uses global config
         if ide_type == IDEType.WINDSURF:
-            return Path(config.mcp_config_path).expanduser()
+            return Path(paths.mcp_config_path).expanduser()
         
         if workspace_dir:
             # Workspace-level config
-            return workspace_dir / config.mcp_config_path
+            return workspace_dir / paths.mcp_config_path
         else:
             # Global config (if supported)
             settings_path = self.get_settings_path(ide_type)
@@ -696,6 +749,17 @@ class IDEManager:
             if not server.enabled:
                 continue
             
+            # Check if server already exists and is manually configured
+            if server.name in existing_servers:
+                existing_config = existing_servers[server.name]
+                # If it exists without the managed marker, it's manually configured - skip it
+                if isinstance(existing_config, dict) and existing_config.get(self.MANAGED_MARKER) != self.MANAGED_VALUE:
+                    logger.warning(
+                        f"Skipping MCP server '{server.name}' - manually configured. "
+                        f"Remove it manually or add '{self.MANAGED_MARKER}: {self.MANAGED_VALUE}' to manage with team-config."
+                    )
+                    continue
+            
             server_config = {
                 "command": server.command,
                 "args": server.args,
@@ -752,7 +816,8 @@ class IDEManager:
         mcp_servers: Optional[List[MCPServerConfig]] = None,
         workspace_dir: Optional[Path] = None,
         profile_name: Optional[str] = None,
-        rules_content: Optional[Dict[str, str]] = None
+        rules_content: Optional[Dict[str, str]] = None,
+        workflows_content: Optional[Dict[str, str]] = None
     ) -> bool:
         """
         Sync configurations to a specific IDE
@@ -764,6 +829,7 @@ class IDEManager:
             workspace_dir: Optional workspace directory for MCP configs
             profile_name: Name of the profile managing these servers
             rules_content: Optional dictionary of {filename: content} for rule files
+            workflows_content: Optional dictionary of {filename: content} for workflow files
         
         Returns:
             True if successful, False otherwise
@@ -777,6 +843,15 @@ class IDEManager:
                 success = self.sync_rules_to_ide(
                     ide_type,
                     rules_content,
+                    workspace_dir,
+                    profile_name
+                )
+            
+            # Sync workflow files if provided
+            if workflows_content and success:
+                success = self.sync_workflows_to_ide(
+                    ide_type,
+                    workflows_content,
                     workspace_dir,
                     profile_name
                 )
@@ -808,7 +883,8 @@ class IDEManager:
         mcp_servers: Optional[List[MCPServerConfig]] = None,
         workspace_dir: Optional[Path] = None,
         profile_name: Optional[str] = None,
-        rules_content: Optional[Dict[str, str]] = None
+        rules_content: Optional[Dict[str, str]] = None,
+        workflows_content: Optional[Dict[str, str]] = None
     ) -> Dict[IDEType, bool]:
         """
         Sync configurations to all detected IDEs
@@ -819,6 +895,7 @@ class IDEManager:
             workspace_dir: Optional workspace directory for MCP configs
             profile_name: Name of the profile managing these servers
             rules_content: Optional dictionary of {filename: content} for rule files
+            workflows_content: Optional dictionary of {filename: content} for workflow files
         
         Returns:
             Dictionary of {ide_type: success}
@@ -833,7 +910,8 @@ class IDEManager:
                 mcp_servers,
                 workspace_dir,
                 profile_name,
-                rules_content
+                rules_content,
+                workflows_content
             )
         
         return results
