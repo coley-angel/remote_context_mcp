@@ -290,11 +290,13 @@ def detect_workspace_root(ide_type: Optional[IDEType] = None, start_path: Option
     """
     Dynamically detect the workspace root directory by looking for IDE-specific markers.
     
-    Searches for:
-    - .windsurf/ directory (Windsurf)
-    - .cursor/ directory (Cursor)
-    - .vscode/ directory (VS Code)
-    - .git/ directory (fallback)
+    Detection order:
+    1. IDE-provided environment variables (VSCODE_CWD, etc.)
+    2. Walk up from start_path looking for markers:
+       - .windsurf/ directory (Windsurf)
+       - .cursor/ directory (Cursor)
+       - .vscode/ directory (VS Code)
+       - .git/ directory (fallback)
     
     Args:
         ide_type: IDE type to search for (searches all if None)
@@ -303,10 +305,33 @@ def detect_workspace_root(ide_type: Optional[IDEType] = None, start_path: Option
     Returns:
         Path to workspace root, or None if not found
     """
+    # First, check for IDE-provided workspace environment variables
+    ide_workspace_vars = [
+        'VSCODE_CWD',           # VS Code workspace directory
+        'VSCODE_WORKSPACE',     # VS Code workspace file location
+        'CURSOR_WORKSPACE',     # Cursor workspace (if available)
+        'WINDSURF_WORKSPACE',   # Windsurf workspace (if available)
+    ]
+    
+    for var in ide_workspace_vars:
+        workspace_path = os.getenv(var)
+        if workspace_path:
+            workspace = Path(workspace_path)
+            if workspace.exists() and workspace.is_dir():
+                logger.info(f"Found workspace from {var}: {workspace}")
+                return workspace
+            elif workspace.exists() and workspace.suffix in ['.code-workspace', '.workspace']:
+                # It's a workspace file, use its parent directory
+                workspace_dir = workspace.parent
+                logger.info(f"Found workspace from {var} (workspace file): {workspace_dir}")
+                return workspace_dir
+    
     if start_path is None:
         start_path = Path.cwd()
     else:
         start_path = Path(start_path)
+    
+    logger.debug(f"Workspace detection starting from: {start_path}")
     
     # IDE-specific directory markers
     ide_markers = {
@@ -319,13 +344,16 @@ def detect_workspace_root(ide_type: Optional[IDEType] = None, start_path: Option
     markers_to_search = []
     if ide_type:
         markers_to_search = ide_markers.get(ide_type, [])
+        logger.debug(f"Searching for {ide_type} markers: {markers_to_search}")
     else:
         # Search for all IDE markers
         for markers in ide_markers.values():
             markers_to_search.extend(markers)
+        logger.debug(f"Searching for all IDE markers")
     
     # Add common markers
     markers_to_search.append('.git')
+    logger.debug(f"All markers to search: {markers_to_search}")
     
     # Walk up the directory tree
     current = start_path.resolve()
@@ -335,18 +363,19 @@ def detect_workspace_root(ide_type: Optional[IDEType] = None, start_path: Option
     depth = 0
     
     while current != current.parent and depth < max_depth:
+        logger.debug(f"Checking directory [{depth}]: {current}")
         # Check for any marker directory
         for marker in markers_to_search:
             marker_path = current / marker
             if marker_path.exists() and marker_path.is_dir():
-                logger.info(f"Found workspace root at {current} (marker: {marker})")
+                logger.info(f"✓ Found workspace root at {current} (marker: {marker})")
                 return current
         
         current = current.parent
         depth += 1
     
     # No workspace root found
-    logger.warning(f"Could not detect workspace root from {start_path}")
+    logger.warning(f"✗ Could not detect workspace root from {start_path}")
     return None
 
 
@@ -623,7 +652,8 @@ async def fetch_content_from_source(
 async def sync_team_config(
     profile_name: Optional[str] = None,
     force_update: bool = False,
-    sync_to_ides: bool = True
+    sync_to_ides: bool = True,
+    scope: str = "auto"
 ) -> str:
     """
     Sync team configuration from central repository and update all IDEs.
@@ -635,27 +665,78 @@ async def sync_team_config(
     - Prompts (reusable AI prompts)
     - MCP server configurations
     
-    Files are saved to IDE-specific directories:
+    Files are saved to IDE-specific directories based on scope:
+    
+    Scope Options:
+    - "auto" (default): Detects workspace automatically, falls back to global
+    - "workspace": Only sync to current workspace (.windsurf/, .cursor/, .vscode/)
+    - "global": Only sync to global user directories (~/.windsurf/, etc.)
+    - "both": Sync to both global and workspace
+    
+    Global locations:
     - VS Code: ~/vscode-instructions/{profile}/
     - Cursor: ~/cursor-instructions/{profile}/
     - Windsurf: ~/windsurf-instructions/{profile}/
+    
+    Workspace locations:
+    - VS Code: {workspace}/.vscode/rules/
+    - Cursor: {workspace}/.cursor/rules/
+    - Windsurf: {workspace}/.windsurf/rules/
     
     Args:
         profile_name: Profile to sync (uses active profile if None)
         force_update: Force pull from remote even if recently updated
         sync_to_ides: Sync to all detected IDEs (Windsurf, Cursor, VS Code)
+        scope: Where to sync - "auto", "workspace", "global", or "both"
     
     Returns:
-        JSON response with sync results and any security issues
+        JSON response with sync results, scope used, and any security issues
     """
     from mcp_tools import sync_profile_tool
     
     config = load_team_config()
     ide_manager = get_ide_manager()
     current_ide = get_current_ide()
-    workspace_dir = get_workspace_dir(current_ide) if sync_to_ides else None
     
-    return await sync_profile_tool(
+    # Determine workspace based on scope
+    workspace_dir = None
+    scope_used = scope
+    
+    if sync_to_ides:
+        if scope == "auto":
+            # Try to detect workspace, but don't fail if not found
+            detected = detect_workspace_root(current_ide)
+            if detected:
+                workspace_dir = detected
+                scope_used = "workspace"
+                logger.info(f"Auto-detected workspace scope: {workspace_dir}")
+            else:
+                workspace_dir = None
+                scope_used = "global"
+                logger.info("Auto-detected global scope (no workspace found)")
+        
+        elif scope == "workspace":
+            # Must find a workspace or return error
+            workspace_dir = detect_workspace_root(current_ide)
+            if not workspace_dir:
+                return json.dumps({
+                    "success": False,
+                    "error": "No workspace detected. Use scope='global' or scope='auto' instead.",
+                    "hint": "Ensure you're in a git repository or have .windsurf/, .cursor/, or .vscode/ directory"
+                })
+            logger.info(f"Using workspace scope: {workspace_dir}")
+        
+        elif scope == "global":
+            # Force global scope (no workspace)
+            workspace_dir = None
+            logger.info("Using global scope (user home directories)")
+        
+        elif scope == "both":
+            # Will handle in sync_profile_tool
+            workspace_dir = detect_workspace_root(current_ide)
+            logger.info(f"Using both scopes - workspace: {workspace_dir if workspace_dir else 'none'}")
+    
+    result = await sync_profile_tool(
         profile_name,
         config,
         CONTENT_DIR,
@@ -665,6 +746,16 @@ async def sync_team_config(
         current_ide,
         get_ide_content_dir
     )
+    
+    # Add scope info to result
+    try:
+        result_data = json.loads(result)
+        result_data["scope"] = scope_used
+        if workspace_dir:
+            result_data["workspace_path"] = str(workspace_dir)
+        return json.dumps(result_data, indent=2)
+    except:
+        return result
 
 
 async def cleanup_profile_rules(profile_name: Optional[str] = None) -> str:
@@ -1405,7 +1496,8 @@ async def sync(
     action: str = "full",
     profile_name: Optional[str] = None,
     force_update: bool = False,
-    sync_to_ides: bool = True
+    sync_to_ides: bool = True,
+    scope: str = "auto"
 ) -> str:
     """
     Synchronization operations - sync content from remote repositories.
@@ -1415,23 +1507,41 @@ async def sync(
         check - Check for updates without syncing
         reload - Reload configuration from source
     
+    Scope (for 'full' action):
+        auto - Auto-detect workspace, fallback to global (default)
+        workspace - Only sync to current workspace (.windsurf/, .cursor/, .vscode/)
+        global - Only sync to global user directories (~/.windsurf/, etc.)
+        both - Sync to both global and workspace
+    
     Args:
         action: Operation to perform (full, check, reload)
         profile_name: Profile to sync (uses active if None)
         force_update: Force update even if recently synced
         sync_to_ides: Sync to IDE directories
+        scope: Where to sync - "auto", "workspace", "global", or "both"
     
     Examples:
+        # Auto-detect workspace
         sync(action="full")
-        sync(action="full", profile_name="production", force_update=True)
+        
+        # Sync only to current workspace
+        sync(action="full", scope="workspace")
+        
+        # Sync only to global user directories
+        sync(action="full", scope="global")
+        
+        # Sync to both global and workspace
+        sync(action="full", scope="both")
+        
+        # Other actions
         sync(action="check")
         sync(action="reload")
     
     Returns:
-        JSON response with sync results
+        JSON response with sync results and scope information
     """
     if action == "full":
-        return await sync_team_config(profile_name, force_update, sync_to_ides)
+        return await sync_team_config(profile_name, force_update, sync_to_ides, scope)
     elif action == "check":
         return await check_for_updates()
     elif action == "reload":
@@ -1441,7 +1551,7 @@ async def sync(
             "success": False,
             "error": f"Unknown action: {action}",
             "available_actions": ["full", "check", "reload"],
-            "usage": "sync(action='full') or sync(action='check')"
+            "usage": "sync(action='full', scope='workspace') or sync(action='check')"
         })
 
 
@@ -1576,6 +1686,8 @@ def main():
     
     # Detect workspace dynamically
     detected_ide = detect_current_ide()
+    logger.info(f"Current working directory: {Path.cwd()}")
+    logger.info(f"Detected IDE: {detected_ide}")
     detected_workspace = detect_workspace_root(detected_ide)
     if detected_workspace:
         logger.info(f"Detected workspace: {detected_workspace}")

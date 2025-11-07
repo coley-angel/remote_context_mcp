@@ -83,10 +83,19 @@ Unified tool for all profile operations:
 
 ### Synchronization: `sync()`
 
-Sync configurations from remote repositories:
+Sync configurations from remote repositories with scope control:
 - **`sync(action="full")`** - Full sync of profile content to IDEs
+- **`sync(action="full", scope="workspace")`** - Sync only to current workspace
+- **`sync(action="full", scope="global")`** - Sync only to global user directories
+- **`sync(action="full", scope="both")`** - Sync to both global and workspace
 - **`sync(action="check")`** - Check for updates without syncing
 - **`sync(action="reload")`** - Reload configuration from source
+
+**Scope Options:**
+- `auto` (default) - Auto-detect workspace, fallback to global
+- `workspace` - Only current project (.windsurf/, .cursor/, .vscode/)
+- `global` - Only user directories (~/.windsurf/, etc.)
+- `both` - Sync to both locations
 
 ### IDE Management: `ide()`
 
@@ -300,6 +309,7 @@ MIT License - See LICENSE file for details
 ---
 
 **Documentation**:
+- [Scope Feature](SCOPE_FEATURE.md) - Global vs workspace configuration control
 - [Workspace Detection](WORKSPACE_DETECTION.md) - Dynamic workspace root detection
 - [Deactivate Feature](DEACTIVATE_FEATURE.md) - Complete profile deactivation
 - [Consolidation Changes](CONSOLIDATION_CHANGES.md) - Tool consolidation details
