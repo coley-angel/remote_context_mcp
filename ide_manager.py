@@ -701,12 +701,18 @@ class IDEManager:
         """
         Update MCP server configurations with tracking for managed servers
         
+        PROTECTION GUARANTEES:
+        - NEVER removes servers without the _managed_by: team-config marker
+        - NEVER modifies servers without the _managed_by: team-config marker
+        - Only manages servers explicitly marked as managed by team-config
+        - Preserves all manually configured servers
+        
         Args:
             ide_type: IDE type
             servers: List of MCP server configurations from profile
             workspace_dir: Workspace directory
             merge: If True, merge with existing servers and remove previously managed servers not in profile;
-                   if False, replace all servers
+                   if False, replace all servers (still only touches managed ones)
             profile_name: Name of the profile managing these servers
         
         Returns:
@@ -727,21 +733,33 @@ class IDEManager:
         
         if merge:
             # Remove previously managed servers that are no longer in the profile
+            # CRITICAL: Only remove if the server still has the managed marker
             servers_to_remove = previously_managed - new_managed_names
             for server_name in servers_to_remove:
                 if server_name in existing_servers:
-                    # Only remove if it still has the managed marker or is in our statefile
                     server_config = existing_servers[server_name]
+                    # ONLY remove if it currently has the managed marker
+                    # This protects servers where user manually removed the marker
                     if isinstance(server_config, dict) and server_config.get(self.MANAGED_MARKER) == self.MANAGED_VALUE:
                         logger.info(f"Removing managed server '{server_name}' (no longer in profile)")
                         existing_servers.pop(server_name)
-                    elif server_name in previously_managed:
-                        logger.info(f"Removing managed server '{server_name}' from statefile")
-                        existing_servers.pop(server_name)
+                    else:
+                        logger.info(
+                            f"Skipping removal of '{server_name}' - no longer has managed marker. "
+                            f"Server appears to have been manually modified."
+                        )
         else:
-            # Replace mode: remove all previously managed servers
+            # Replace mode: remove ONLY previously managed servers that still have the marker
             for server_name in previously_managed:
-                existing_servers.pop(server_name, None)
+                if server_name in existing_servers:
+                    server_config = existing_servers[server_name]
+                    # ONLY remove if it currently has the managed marker
+                    if isinstance(server_config, dict) and server_config.get(self.MANAGED_MARKER) == self.MANAGED_VALUE:
+                        existing_servers.pop(server_name)
+                    else:
+                        logger.info(
+                            f"Preserving '{server_name}' - no longer has managed marker"
+                        )
         
         # Add/update servers from profile
         new_managed_servers = {}

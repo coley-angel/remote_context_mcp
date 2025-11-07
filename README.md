@@ -91,11 +91,18 @@ profiles:
 
 ### MCP Server Management
 
-The system intelligently manages MCP servers:
-- **Managed Servers**: Servers added by team-config have a `_managed_by: team-config` marker
-- **Manual Servers**: Servers without the marker are considered manually configured
-- **Protection**: Team-config will NOT modify or remove manually configured servers
-- **Override**: To let team-config manage a manual server, add `"_managed_by": "team-config"` to it
+The system intelligently manages MCP servers with **strict protection guarantees**:
+
+**Protection Rules:**
+- ✅ **NEVER removes** servers without `_managed_by: team-config` marker
+- ✅ **NEVER modifies** servers without `_managed_by: team-config` marker  
+- ✅ **NEVER touches** manually configured servers
+- ✅ **Always preserves** your custom MCP servers
+
+**Server Types:**
+- **Managed Servers**: Have `_managed_by: team-config` marker → Fully managed by team-config
+- **Manual Servers**: No marker → Completely protected from team-config
+- **Override**: To let team-config manage an existing server, add `"_managed_by": "team-config"` to it
 
 **Example**: If your MCP config has:
 ```json
