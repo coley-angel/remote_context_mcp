@@ -653,7 +653,8 @@ async def sync_team_config(
     profile_name: Optional[str] = None,
     force_update: bool = False,
     sync_to_ides: bool = True,
-    scope: str = "auto"
+    scope: str = "auto",
+    workspace_path: Optional[str] = None
 ) -> str:
     """
     Sync team configuration from central repository and update all IDEs.
@@ -698,31 +699,47 @@ async def sync_team_config(
     ide_manager = get_ide_manager()
     current_ide = get_current_ide()
     
-    # Determine workspace based on scope
+    # Determine workspace based on scope and provided workspace_path
     workspace_dir = None
     scope_used = scope
     
     if sync_to_ides:
-        if scope == "auto":
-            # Try to detect workspace, but don't fail if not found
-            detected = detect_workspace_root(current_ide)
-            if detected:
-                workspace_dir = detected
+        # If workspace_path provided, use it
+        if workspace_path:
+            workspace_dir = Path(workspace_path)
+            if not workspace_dir.exists():
+                return json.dumps({
+                    "success": False,
+                    "error": f"Provided workspace_path does not exist: {workspace_path}",
+                    "hint": "Provide an absolute path to an existing project directory"
+                })
+            logger.info(f"Using provided workspace path: {workspace_dir}")
+            if scope == "auto":
                 scope_used = "workspace"
-                logger.info(f"Auto-detected workspace scope: {workspace_dir}")
-            else:
-                workspace_dir = None
-                scope_used = "global"
-                logger.info("Auto-detected global scope (no workspace found)")
+        
+        if scope == "auto":
+            # Use provided workspace_path or try to detect
+            if not workspace_dir:
+                detected = detect_workspace_root(current_ide)
+                if detected:
+                    workspace_dir = detected
+                    scope_used = "workspace"
+                    logger.info(f"Auto-detected workspace scope: {workspace_dir}")
+                else:
+                    workspace_dir = None
+                    scope_used = "global"
+                    logger.info("Auto-detected global scope (no workspace found)")
         
         elif scope == "workspace":
-            # Must find a workspace or return error
-            workspace_dir = detect_workspace_root(current_ide)
+            # Must have workspace_path or be able to detect it
+            if not workspace_dir:
+                workspace_dir = detect_workspace_root(current_ide)
             if not workspace_dir:
                 return json.dumps({
                     "success": False,
-                    "error": "No workspace detected. Use scope='global' or scope='auto' instead.",
-                    "hint": "Ensure you're in a git repository or have .windsurf/, .cursor/, or .vscode/ directory"
+                    "error": "No workspace provided or detected. Please provide workspace_path parameter.",
+                    "hint": "sync(action='full', workspace_path='/absolute/path/to/project', scope='workspace')",
+                    "example": "sync(action='full', workspace_path='/Users/username/my-project')"
                 })
             logger.info(f"Using workspace scope: {workspace_dir}")
         
@@ -732,8 +749,9 @@ async def sync_team_config(
             logger.info("Using global scope (user home directories)")
         
         elif scope == "both":
-            # Will handle in sync_profile_tool
-            workspace_dir = detect_workspace_root(current_ide)
+            # Use provided workspace_path or detect
+            if not workspace_dir:
+                workspace_dir = detect_workspace_root(current_ide)
             logger.info(f"Using both scopes - workspace: {workspace_dir if workspace_dir else 'none'}")
     
     result = await sync_profile_tool(
@@ -1494,6 +1512,7 @@ async def profile(
 @mcp.tool()
 async def sync(
     action: str = "full",
+    workspace_path: Optional[str] = None,
     profile_name: Optional[str] = None,
     force_update: bool = False,
     sync_to_ides: bool = True,
@@ -1502,36 +1521,40 @@ async def sync(
     """
     Synchronization operations - sync content from remote repositories.
     
+    ⚠️  IMPORTANT: Always provide workspace_path parameter when syncing!
+    
     Actions:
         full - Full sync from remote repository (fetch rules, workflows, etc.)
         check - Check for updates without syncing
         reload - Reload configuration from source
     
     Scope (for 'full' action):
-        auto - Auto-detect workspace, fallback to global (default)
-        workspace - Only sync to current workspace (.windsurf/, .cursor/, .vscode/)
+        auto - Use provided workspace_path, fallback to global if None
+        workspace - Only sync to workspace_path (.windsurf/, .cursor/, .vscode/)
         global - Only sync to global user directories (~/.windsurf/, etc.)
-        both - Sync to both global and workspace
+        both - Sync to both global and workspace_path
     
     Args:
         action: Operation to perform (full, check, reload)
+        workspace_path: **REQUIRED for workspace sync** - Absolute path to project root
+                       (where .vscode/.cursor/.windsurf directories should be created)
         profile_name: Profile to sync (uses active if None)
         force_update: Force update even if recently synced
         sync_to_ides: Sync to IDE directories
         scope: Where to sync - "auto", "workspace", "global", or "both"
     
     Examples:
-        # Auto-detect workspace
-        sync(action="full")
+        # Sync to specific workspace (RECOMMENDED)
+        sync(action="full", workspace_path="/absolute/path/to/project")
         
-        # Sync only to current workspace
-        sync(action="full", scope="workspace")
+        # Sync only to workspace
+        sync(action="full", workspace_path="/absolute/path/to/project", scope="workspace")
         
         # Sync only to global user directories
         sync(action="full", scope="global")
         
         # Sync to both global and workspace
-        sync(action="full", scope="both")
+        sync(action="full", workspace_path="/absolute/path/to/project", scope="both")
         
         # Other actions
         sync(action="check")
@@ -1541,7 +1564,7 @@ async def sync(
         JSON response with sync results and scope information
     """
     if action == "full":
-        return await sync_team_config(profile_name, force_update, sync_to_ides, scope)
+        return await sync_team_config(profile_name, force_update, sync_to_ides, scope, workspace_path)
     elif action == "check":
         return await check_for_updates()
     elif action == "reload":

@@ -84,18 +84,23 @@ Unified tool for all profile operations:
 ### Synchronization: `sync()`
 
 Sync configurations from remote repositories with scope control:
-- **`sync(action="full")`** - Full sync of profile content to IDEs
-- **`sync(action="full", scope="workspace")`** - Sync only to current workspace
+
+⚠️ **IMPORTANT**: Always provide `workspace_path` parameter to ensure IDE directories are created in the correct location!
+
+- **`sync(action="full", workspace_path="/path/to/project")`** - Full sync to specific workspace
+- **`sync(action="full", workspace_path="/path/to/project", scope="workspace")`** - Sync only to workspace
 - **`sync(action="full", scope="global")`** - Sync only to global user directories
-- **`sync(action="full", scope="both")`** - Sync to both global and workspace
+- **`sync(action="full", workspace_path="/path/to/project", scope="both")`** - Sync to both global and workspace
 - **`sync(action="check")`** - Check for updates without syncing
 - **`sync(action="reload")`** - Reload configuration from source
 
-**Scope Options:**
-- `auto` (default) - Auto-detect workspace, fallback to global
-- `workspace` - Only current project (.windsurf/, .cursor/, .vscode/)
-- `global` - Only user directories (~/.windsurf/, etc.)
-- `both` - Sync to both locations
+**Parameters:**
+- `workspace_path` - **REQUIRED for workspace sync** - Absolute path to project root where `.vscode/`, `.cursor/`, or `.windsurf/` directories should be created
+- `scope` - Where to sync:
+  - `auto` (default) - Use provided workspace_path, fallback to global
+  - `workspace` - Only sync to workspace_path
+  - `global` - Only user directories (~/.windsurf/, etc.)
+  - `both` - Sync to both locations
 
 ### IDE Management: `ide()`
 
@@ -286,7 +291,7 @@ The server automatically detects installed IDEs. If your IDE isn't detected:
 
 2. **Sync to your IDE**:
    ```
-   Use MCP tool: sync(action="full", profile_name="dev")
+   Use MCP tool: sync(action="full", workspace_path="/absolute/path/to/project", profile_name="dev")
    ```
 
 3. **Switch profiles** (auto-cleans old rules):
