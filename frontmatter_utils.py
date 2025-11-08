@@ -3,30 +3,48 @@ Frontmatter Utilities
 
 Handles frontmatter parsing, validation, and generation for rule files.
 Rules must have frontmatter with trigger configuration.
+Supports MDC (Markdown with Configuration) format for Cursor rules.
 """
 import re
 import logging
 from typing import Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+from schemas import FrontmatterConfig
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class RuleFrontmatter:
-    """Rule frontmatter configuration"""
-    trigger: str = "always_on"  # always_on, manual, on_demand
-    glob: Optional[str] = None
-    description: Optional[str] = None
+def frontmatter_to_yaml(config: FrontmatterConfig) -> str:
+    """
+    Convert FrontmatterConfig to YAML format for MDC files
     
-    def to_yaml(self) -> str:
-        """Convert to YAML format"""
-        lines = [f"trigger: {self.trigger}"]
-        if self.glob:
-            lines.append(f"glob: {self.glob}")
-        if self.description:
-            lines.append(f"description: {self.description}")
-        return "\n".join(lines)
+    Args:
+        config: FrontmatterConfig object with default values
+    
+    Returns:
+        YAML formatted string
+    """
+    lines = []
+    
+    # Required fields
+    lines.append(f"trigger: {config.trigger}")
+    
+    # Optional fields
+    if config.glob:
+        lines.append(f"glob: {config.glob}")
+    if config.description:
+        lines.append(f"description: {config.description}")
+    if config.priority:
+        lines.append(f"priority: {config.priority}")
+    if config.tags:
+        # Format tags as YAML array
+        tags_str = "[" + ", ".join(config.tags) + "]"
+        lines.append(f"tags: {tags_str}")
+    if config.author:
+        lines.append(f"author: {config.author}")
+    if config.version:
+        lines.append(f"version: {config.version}")
+    
+    return "\n".join(lines)
 
 
 def parseFrontmatter(content: str) -> Tuple[Optional[Dict[str, Any]], str]:
@@ -87,17 +105,17 @@ def validateFrontmatter(frontmatter: Optional[Dict[str, Any]]) -> Tuple[bool, Op
 
 def addFrontmatterToContent(
     content: str,
-    frontmatter: Optional[RuleFrontmatter] = None
+    frontmatter_config: Optional[FrontmatterConfig] = None
 ) -> str:
     """
-    Add frontmatter to content if missing or invalid
+    Add frontmatter to content if missing or invalid (MDC format)
     
     Args:
         content: File content
-        frontmatter: Optional custom frontmatter (defaults to always_on)
+        frontmatter_config: Optional custom frontmatter defaults
     
     Returns:
-        Content with valid frontmatter
+        Content with valid frontmatter in MDC format
     """
     existingFrontmatter, contentBody = parseFrontmatter(content)
     
@@ -109,17 +127,17 @@ def addFrontmatterToContent(
         return content
     
     # Add default frontmatter if missing or invalid
-    if frontmatter is None:
-        frontmatter = RuleFrontmatter()
+    if frontmatter_config is None:
+        frontmatter_config = FrontmatterConfig()
     
     # Log the action
     if existingFrontmatter:
         logger.info(f"Replacing invalid frontmatter: {errorMsg}")
     else:
-        logger.info("Adding missing frontmatter with default trigger: always_on")
+        logger.info(f"Adding missing frontmatter (trigger: {frontmatter_config.trigger})")
     
-    # Build content with frontmatter
-    frontmatterYaml = frontmatter.to_yaml()
+    # Build content with frontmatter (MDC format)
+    frontmatterYaml = frontmatter_to_yaml(frontmatter_config)
     return f"---\n{frontmatterYaml}\n---\n\n{contentBody}"
 
 

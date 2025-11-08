@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, List
 import yaml
 from schemas import (
     TeamConfig, Profile, RemoteSource, SecurityConfig, MCPServerConfig,
-    SecurityLevel, IDEType, ContentType
+    SecurityLevel, IDEType, ContentType, FrontmatterConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -179,6 +179,10 @@ class ConfigLoader:
         security_data = data.get("security", {})
         security = ConfigLoader._parse_security_config(security_data)
         
+        # Parse frontmatter defaults
+        frontmatter_data = data.get("frontmatter_defaults", {})
+        frontmatter_defaults = ConfigLoader._parse_frontmatter_config(frontmatter_data)
+        
         # Parse central repo
         central_repo = None
         central_repo_data = data.get("central_repo")
@@ -196,6 +200,7 @@ class ConfigLoader:
             mcp_servers=mcp_servers,
             ide_overrides=ide_overrides,
             security=security,
+            frontmatter_defaults=frontmatter_defaults,
             central_repo=central_repo,
             tags=data.get("tags", []),
         )
@@ -277,6 +282,19 @@ class ConfigLoader:
             inputs=data.get("inputs"),
             disabled=data.get("disabled"),
             autoApprove=data.get("autoApprove"),
+        )
+    
+    @staticmethod
+    def _parse_frontmatter_config(data: Dict[str, Any]) -> FrontmatterConfig:
+        """Parse frontmatter configuration"""
+        return FrontmatterConfig(
+            trigger=data.get("trigger", "always_on"),
+            glob=data.get("glob"),
+            description=data.get("description"),
+            priority=data.get("priority"),
+            tags=data.get("tags", []),
+            author=data.get("author"),
+            version=data.get("version"),
         )
     
     @staticmethod

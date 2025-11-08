@@ -49,6 +49,18 @@ class RemoteSource:
 
 
 @dataclass
+class FrontmatterConfig:
+    """Default frontmatter configuration for rules"""
+    trigger: str = "always_on"  # always_on, manual, on_demand
+    glob: Optional[str] = None  # File pattern (e.g., *.py, *.{js,ts})
+    description: Optional[str] = None
+    priority: Optional[str] = None  # critical, high, medium, low
+    tags: List[str] = field(default_factory=list)
+    author: Optional[str] = None
+    version: Optional[str] = None
+    
+
+@dataclass
 class SecurityConfig:
     """Security validation configuration"""
     enabled: bool = True
@@ -195,6 +207,9 @@ class Profile:
     
     # Security settings
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    
+    # Frontmatter defaults for rules (MDC format)
+    frontmatter_defaults: FrontmatterConfig = field(default_factory=FrontmatterConfig)
     
     # Central repository configuration
     central_repo: Optional[RemoteSource] = None

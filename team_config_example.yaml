@@ -77,6 +77,16 @@ profiles:
     active: true
     description: "General development profile with standard guidelines"
     
+    # Default frontmatter for rules (MDC format for Cursor compatibility)
+    frontmatter_defaults:
+      trigger: always_on  # always_on, manual, on_demand
+      glob: null  # Can set default glob pattern (e.g., *.py, *.{js,ts})
+      description: null  # Default description
+      priority: high  # critical, high, medium, low
+      tags: [development, team-standards]
+      author: Platform Team
+      version: 1.0.0
+    
     # Instructions (general AI guidance)
     instructions:
       - url: "https://raw.githubusercontent.com/your-org/guidelines/main/general-instructions.md"
