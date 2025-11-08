@@ -30,7 +30,7 @@ from schemas import IDEType, ContentType, TeamConfig, Profile
 from config_loader import ConfigLoader
 from security_validator import SecurityValidator, create_default_security_config
 from repo_manager import create_repo_manager
-# Note: ide_manager removed in V2 - no longer needed (IDE-agnostic)
+from ide_manager import create_ide_manager
 
 # Set up logging (use stderr to avoid interfering with MCP stdio protocol)
 logging.basicConfig(
@@ -118,9 +118,10 @@ _BACKUP_DIR = None
 
 # Initialize managers (will be created on first use)
 _repo_manager = None
+_ide_manager = None
 _security_validator = None
 _current_config: Optional[TeamConfig] = None
-# Note: _ide_manager and _current_ide removed in V2 - no longer needed
+_current_ide: Optional[IDEType] = None  # Detected or user-specified IDE
 
 
 def get_repo_specific_dirname(repo_url: Optional[str]) -> str:
