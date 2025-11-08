@@ -1,10 +1,12 @@
 # MCP Tools Test Report
 
 ## Test Date
-2025-11-07
+2025-11-07 (Updated)
 
-## Issue Found
-**Error in sync() function:**
+## Issues Found & Fixed
+
+### Issue 1: RepoManager Initialization Error ✅ FIXED
+**Error:**
 ```
 RepoManager.__init__() missing 1 required positional argument: 'cache_dir'
 ```
@@ -19,11 +21,29 @@ repo_manager = RepoManager()  # Missing cache_dir parameter
 repo_manager = get_repo_manager()  # Uses proper initialization
 ```
 
-## Fix Applied
-Changed `sync_with_ide_config()` function in `main.py`:
-- Line 1781-1782: Removed direct RepoManager instantiation
-- Now uses `get_repo_manager()` helper function
+**Fix:**
+- Changed line 1781: Use `get_repo_manager()` helper function
 - Properly initializes with cache_dir from CONTENT_DIR
+
+### Issue 2: Missing fetch_content Method ✅ FIXED
+**Error:**
+```
+AttributeError: 'RepoManager' object has no attribute 'fetch_content'
+```
+
+**Root Cause:**
+```python
+# Wrong:
+files = await repo_manager.fetch_content(source, "rules")  # Method doesn't exist
+
+# Correct:
+fetched_items = await fetch_content_from_source(source, ContentType.RULE, profile.name)
+```
+
+**Fix:**
+- RepoManager only has: `clone_or_update_repo()`, `get_files_from_repo()`, `get_file_content()`
+- Use existing `fetch_content_from_source()` function instead
+- Updated all 4 content types: rules, workflows, prompts, instructions
 
 ## Test Suite Created
 
@@ -43,7 +63,7 @@ Comprehensive test of all MCP tools.
 10. `clear_cache()` - Clear caches
 
 ### 2. test_sync.py
-Specific test for sync function with user's exact parameters.
+Basic sync test with fallback config (no content sources).
 
 **Parameters:**
 ```python
@@ -52,6 +72,14 @@ workspace_path="/Users/coangel/Documents/Ops_Stack_Development/Ops_Stack_Dev_Pro
 ide_choice=1
 force_update=True
 ```
+
+### 3. test_sync_v1_config.py
+Real-world sync test with actual V1 config that has GitHub content sources.
+
+**Tests:**
+- Fetches rules and workflows from GitHub
+- Applies team-config suffix to files
+- Verifies file tracking system
 
 ## Test Results
 
