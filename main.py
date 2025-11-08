@@ -1778,8 +1778,7 @@ async def sync_with_ide_config(
         logger.info(f"=" * 70)
         
         # Fetch content from remote sources
-        from repo_manager import RepoManager
-        repo_manager = RepoManager()
+        repo_manager = get_repo_manager()
         
         synced_files = {
             "rules": [],
