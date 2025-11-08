@@ -1089,20 +1089,27 @@ async def list_profiles() -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-async def set_active_profile(profile_name: str, auto_sync: bool = True) -> str:
+async def set_active_profile(
+    profile_name: str, 
+    workspace_path: Optional[str] = None,
+    auto_sync: bool = False
+) -> str:
     """
     Set the active configuration profile.
     
+    V2: Cleans up team-managed files (*.team-config.{old-profile}.*) from previous profile.
+    User files without the suffix are preserved.
+    
     Args:
         profile_name: Name of profile to activate
-        auto_sync: Automatically sync the profile after activation
+        workspace_path: Workspace path for cleanup (optional - only needed if switching profiles)
+        auto_sync: Automatically sync the profile after activation (requires workspace_path)
     
     Returns:
         JSON response indicating success or failure
     """
     try:
         config = load_team_config()
-        ide_manager = get_ide_manager()
         
         if profile_name not in config.profiles:
             return json.dumps({
@@ -1118,16 +1125,24 @@ async def set_active_profile(profile_name: str, auto_sync: bool = True) -> str:
                 previously_active = name
                 break
         
-        # Cleanup previously active profile rules
+        # Cleanup previously active profile's team-managed files
         cleanup_results = {}
         if previously_active and previously_active != profile_name:
-            logger.info(f"Cleaning up rules from previous profile: {previously_active}")
-            current_ide = get_current_ide()
-            workspace_dir = get_workspace_dir(current_ide)
-            cleanup_results = ide_manager.cleanup_all_ides(
-                previously_active,
-                workspace_dir
-            )
+            if workspace_path:
+                workspace_dir = Path(workspace_path)
+                if workspace_dir.exists():
+                    logger.info(f"Cleaning up team files from profile '{previously_active}'")
+                    old_profile = config.profiles[previously_active]
+                    cleanup_results = cleanup_profile_files(
+                        workspace_dir,
+                        previously_active,
+                        old_profile.ide_configs
+                    )
+                else:
+                    logger.warning(f"Workspace path does not exist: {workspace_path}")
+            else:
+                logger.info(f"No workspace_path provided - skipping cleanup of old profile files")
+                logger.info(f"Old team files (*.team-config.{previously_active}.*) will remain")
         
         # Deactivate all profiles
         for profile in config.profiles.values():
@@ -1146,13 +1161,17 @@ async def set_active_profile(profile_name: str, auto_sync: bool = True) -> str:
             "message": f"Profile '{profile_name}' activated",
             "profile": profile_name,
             "previous_profile": previously_active,
-            "cleanup_results": {ide.value: success for ide, success in cleanup_results.items()} if cleanup_results else {}
+            "cleanup_results": cleanup_results if cleanup_results else {},
+            "note": "Use sync() to apply the new profile's configuration"
         }
         
-        # Auto-sync if requested
+        # Auto-sync if requested (requires workspace_path)
         if auto_sync:
-            sync_result = await sync_team_config(profile_name)
-            response["sync_result"] = json.loads(sync_result)
+            if not workspace_path:
+                response["sync_skipped"] = "workspace_path required for auto-sync"
+            else:
+                logger.info("Auto-sync requested but V2 requires explicit IDE selection")
+                response["sync_skipped"] = "Use sync(action='full', workspace_path='...', ide_choice=N) to apply profile"
         
         return json.dumps(response, indent=2)
         
@@ -1580,6 +1599,65 @@ async def list_ide_configs(profile_name: Optional[str] = None) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def cleanup_profile_files(
+    workspace_dir: Path,
+    profile_name: str,
+    ide_configs: Dict[str, Any]
+) -> Dict[str, List[str]]:
+    """
+    Remove team-managed files for a specific profile.
+    
+    Only removes files with .team-config.{profile}.* suffix.
+    Preserves user-created files without the suffix.
+    
+    Args:
+        workspace_dir: Workspace root directory
+        profile_name: Profile name whose files should be removed
+        ide_configs: IDE configurations with path information
+    
+    Returns:
+        Dict mapping IDE names to lists of deleted file paths
+    """
+    deleted_by_ide = {}
+    pattern = f"*.team-config.{profile_name}.*"
+    
+    logger.info(f"Cleaning up team-managed files for profile '{profile_name}'")
+    logger.info(f"Pattern: {pattern}")
+    
+    for ide_name, ide_config in ide_configs.items():
+        deleted = []
+        
+        # Check each content type directory
+        for content_type in ['rules', 'workflows', 'prompts', 'instructions']:
+            content_path = getattr(ide_config.paths, content_type, None)
+            if not content_path:
+                continue
+            
+            content_dir = workspace_dir / content_path
+            if not content_dir.exists():
+                continue
+            
+            # Find and delete team-managed files
+            for file in content_dir.glob(pattern):
+                try:
+                    file.unlink()
+                    deleted.append(str(file.relative_to(workspace_dir)))
+                    logger.info(f"✓ Removed: {file.relative_to(workspace_dir)}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove {file}: {e}")
+        
+        if deleted:
+            deleted_by_ide[ide_name] = deleted
+    
+    total_deleted = sum(len(v) for v in deleted_by_ide.values())
+    if total_deleted > 0:
+        logger.info(f"Cleaned up {total_deleted} team-managed files")
+    else:
+        logger.info("No team-managed files found to clean up")
+    
+    return deleted_by_ide
+
+
 async def sync_with_ide_config(
     workspace_path: Optional[str],
     ide_choice: Optional[int],
@@ -1592,6 +1670,7 @@ async def sync_with_ide_config(
     
     V2: Simplified sync that uses IDE config from profile.
     All paths are workspace-relative, no global directories.
+    Files are saved with .team-config.{profile}.* suffix to identify team-managed files.
     
     Args:
         workspace_path: Absolute path to project root (REQUIRED)
@@ -1724,7 +1803,12 @@ async def sync_with_ide_config(
                         ide_config.frontmatter_defaults
                     )
                     
-                    target_file = rules_dir / Path(file_path).name
+                    # Add team-config suffix to identify managed files
+                    original_name = Path(file_path).stem
+                    extension = Path(file_path).suffix
+                    managed_name = f"{original_name}.team-config.{profile.name}{extension}"
+                    
+                    target_file = rules_dir / managed_name
                     target_file.write_text(content_with_frontmatter)
                     synced_files["rules"].append(str(target_file.relative_to(workspace_dir)))
                     logger.info(f"✓ Synced rule: {target_file.relative_to(workspace_dir)}")
@@ -1737,7 +1821,12 @@ async def sync_with_ide_config(
             for source in profile.workflows:
                 files = await repo_manager.fetch_content(source, "workflows")
                 for file_path, content in files.items():
-                    target_file = workflows_dir / Path(file_path).name
+                    # Add team-config suffix
+                    original_name = Path(file_path).stem
+                    extension = Path(file_path).suffix
+                    managed_name = f"{original_name}.team-config.{profile.name}{extension}"
+                    
+                    target_file = workflows_dir / managed_name
                     target_file.write_text(content)
                     synced_files["workflows"].append(str(target_file.relative_to(workspace_dir)))
                     logger.info(f"✓ Synced workflow: {target_file.relative_to(workspace_dir)}")
@@ -1750,7 +1839,12 @@ async def sync_with_ide_config(
             for source in profile.prompts:
                 files = await repo_manager.fetch_content(source, "prompts")
                 for file_path, content in files.items():
-                    target_file = prompts_dir / Path(file_path).name
+                    # Add team-config suffix
+                    original_name = Path(file_path).stem
+                    extension = Path(file_path).suffix
+                    managed_name = f"{original_name}.team-config.{profile.name}{extension}"
+                    
+                    target_file = prompts_dir / managed_name
                     target_file.write_text(content)
                     synced_files["prompts"].append(str(target_file.relative_to(workspace_dir)))
                     logger.info(f"✓ Synced prompt: {target_file.relative_to(workspace_dir)}")
@@ -1763,7 +1857,12 @@ async def sync_with_ide_config(
             for source in profile.instructions:
                 files = await repo_manager.fetch_content(source, "instructions")
                 for file_path, content in files.items():
-                    target_file = instructions_dir / Path(file_path).name
+                    # Add team-config suffix
+                    original_name = Path(file_path).stem
+                    extension = Path(file_path).suffix
+                    managed_name = f"{original_name}.team-config.{profile.name}{extension}"
+                    
+                    target_file = instructions_dir / managed_name
                     target_file.write_text(content)
                     synced_files["instructions"].append(str(target_file.relative_to(workspace_dir)))
                     logger.info(f"✓ Synced instruction: {target_file.relative_to(workspace_dir)}")
@@ -1858,29 +1957,30 @@ async def clear_cache(cache_type: str = "all") -> str:
 async def profile(
     action: str = "list",
     profile_name: Optional[str] = None,
-    auto_sync: bool = True
+    workspace_path: Optional[str] = None,
+    auto_sync: bool = False
 ) -> str:
     """
     Profile management - unified tool for all profile operations.
     
+    V2: Profile switching now cleans up team-managed files (*.team-config.{profile}.*).
+    User-created files without the suffix are preserved.
+    
     Actions:
         list - List all available profiles with their configurations
-        activate - Set a profile as active and optionally sync
+        activate - Set a profile as active, cleanup old team files
         show - Show detailed configuration for current or specified profile
-        cleanup - Remove profile rules from IDEs (rules/workflows only)
-        deactivate - Fully deactivate profile (removes MCP servers, rules, workflows, prompts)
     
     Args:
-        action: Operation to perform (list, activate, show, cleanup, deactivate)
-        profile_name: Profile name (required for activate/cleanup/deactivate)
-        auto_sync: Auto-sync after activation (default: True)
+        action: Operation to perform (list, activate, show)
+        profile_name: Profile name (required for activate)
+        workspace_path: Workspace path for cleanup when switching profiles
+        auto_sync: Auto-sync after activation (not recommended in V2 - use sync() explicitly)
     
     Examples:
         profile(action="list")
-        profile(action="activate", profile_name="production", auto_sync=True)
+        profile(action="activate", profile_name="production", workspace_path="/path/to/project")
         profile(action="show")
-        profile(action="cleanup", profile_name="old-profile")
-        profile(action="deactivate", profile_name="default")
     
     Returns:
         JSON response with operation results
@@ -1891,21 +1991,18 @@ async def profile(
         if not profile_name:
             return json.dumps({
                 "success": False,
-                "error": "profile_name required for 'activate' action"
+                "error": "profile_name required for 'activate' action",
+                "usage": "profile(action='activate', profile_name='production', workspace_path='/path')"
             })
-        return await set_active_profile(profile_name, auto_sync)
+        return await set_active_profile(profile_name, workspace_path, auto_sync)
     elif action == "show":
         return await get_config()
-    elif action == "cleanup":
-        return await cleanup_profile_rules(profile_name)
-    elif action == "deactivate":
-        return await deactivate_profile(profile_name)
     else:
         return json.dumps({
             "success": False,
             "error": f"Unknown action: {action}",
-            "available_actions": ["list", "activate", "show", "cleanup", "deactivate"],
-            "usage": "profile(action='list') or profile(action='deactivate', profile_name='default')"
+            "available_actions": ["list", "activate", "show"],
+            "usage": "profile(action='list') or profile(action='activate', profile_name='production', workspace_path='/path')"
         })
 
 
