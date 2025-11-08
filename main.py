@@ -1793,8 +1793,11 @@ async def sync_with_ide_config(
             rules_dir.mkdir(parents=True, exist_ok=True)
             
             for source in profile.rules:
-                files = await repo_manager.fetch_content(source, "rules")
-                for file_path, content in files.items():
+                fetched_items = await fetch_content_from_source(source, ContentType.RULE, profile.name)
+                for item in fetched_items:
+                    content = item["content"]
+                    source_path = item["source"]
+                    
                     # Add frontmatter if missing
                     from frontmatter_utils import addFrontmatterToContent
                     content_with_frontmatter = addFrontmatterToContent(
@@ -1803,8 +1806,8 @@ async def sync_with_ide_config(
                     )
                     
                     # Add team-config suffix to identify managed files
-                    original_name = Path(file_path).stem
-                    extension = Path(file_path).suffix
+                    original_name = Path(source_path).stem
+                    extension = Path(source_path).suffix
                     managed_name = f"{original_name}.team-config.{profile.name}{extension}"
                     
                     target_file = rules_dir / managed_name
@@ -1818,11 +1821,14 @@ async def sync_with_ide_config(
             workflows_dir.mkdir(parents=True, exist_ok=True)
             
             for source in profile.workflows:
-                files = await repo_manager.fetch_content(source, "workflows")
-                for file_path, content in files.items():
+                fetched_items = await fetch_content_from_source(source, ContentType.WORKFLOW, profile.name)
+                for item in fetched_items:
+                    content = item["content"]
+                    source_path = item["source"]
+                    
                     # Add team-config suffix
-                    original_name = Path(file_path).stem
-                    extension = Path(file_path).suffix
+                    original_name = Path(source_path).stem
+                    extension = Path(source_path).suffix
                     managed_name = f"{original_name}.team-config.{profile.name}{extension}"
                     
                     target_file = workflows_dir / managed_name
@@ -1836,11 +1842,14 @@ async def sync_with_ide_config(
             prompts_dir.mkdir(parents=True, exist_ok=True)
             
             for source in profile.prompts:
-                files = await repo_manager.fetch_content(source, "prompts")
-                for file_path, content in files.items():
+                fetched_items = await fetch_content_from_source(source, ContentType.PROMPT, profile.name)
+                for item in fetched_items:
+                    content = item["content"]
+                    source_path = item["source"]
+                    
                     # Add team-config suffix
-                    original_name = Path(file_path).stem
-                    extension = Path(file_path).suffix
+                    original_name = Path(source_path).stem
+                    extension = Path(source_path).suffix
                     managed_name = f"{original_name}.team-config.{profile.name}{extension}"
                     
                     target_file = prompts_dir / managed_name
@@ -1854,11 +1863,14 @@ async def sync_with_ide_config(
             instructions_dir.mkdir(parents=True, exist_ok=True)
             
             for source in profile.instructions:
-                files = await repo_manager.fetch_content(source, "instructions")
-                for file_path, content in files.items():
+                fetched_items = await fetch_content_from_source(source, ContentType.INSTRUCTION, profile.name)
+                for item in fetched_items:
+                    content = item["content"]
+                    source_path = item["source"]
+                    
                     # Add team-config suffix
-                    original_name = Path(file_path).stem
-                    extension = Path(file_path).suffix
+                    original_name = Path(source_path).stem
+                    extension = Path(source_path).suffix
                     managed_name = f"{original_name}.team-config.{profile.name}{extension}"
                     
                     target_file = instructions_dir / managed_name
