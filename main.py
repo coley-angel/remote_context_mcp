@@ -238,25 +238,58 @@ def detect_current_ide() -> Optional[IDEType]:
     Returns:
         Detected IDE type or None if cannot determine
     """
-    # Check environment variables that might indicate the IDE
-    if os.getenv("VSCODE_PID") or os.getenv("VSCODE_CWD"):
-        return IDEType.VSCODE
+    # Log all potentially relevant environment variables for debugging
+    relevant_env_vars = [
+        'VSCODE_PID', 'VSCODE_CWD', 'VSCODE_IPC_HOOK', 'VSCODE_NLS_CONFIG',
+        'CURSOR_PID', 'CURSOR_USER_DATA_DIR',
+        'WINDSURF_PID', 'CODEIUM_PID', 'CODEIUM_API_KEY',
+        'TERM_PROGRAM', 'TERM_PROGRAM_VERSION'
+    ]
     
-    if os.getenv("CURSOR_PID"):
-        return IDEType.CURSOR
+    env_status = {}
+    for var in relevant_env_vars:
+        val = os.getenv(var)
+        if val:
+            # Truncate long values for logging
+            display_val = val[:50] + '...' if len(val) > 50 else val
+            env_status[var] = display_val
     
-    # Check for Windsurf-specific indicators
-    if os.getenv("WINDSURF_PID") or os.getenv("CODEIUM_PID"):
+    if env_status:
+        logger.debug(f"IDE detection environment variables: {env_status}")
+    
+    # Check for Windsurf first (most specific)
+    # Windsurf uses Codeium infrastructure
+    if os.getenv("CODEIUM_PID") or os.getenv("WINDSURF_PID"):
+        logger.info("Detected IDE: Windsurf (via CODEIUM_PID/WINDSURF_PID)")
         return IDEType.WINDSURF
     
+    # Check TERM_PROGRAM for Windsurf
+    term_program = os.getenv("TERM_PROGRAM")
+    if term_program and "windsurf" in term_program.lower():
+        logger.info(f"Detected IDE: Windsurf (via TERM_PROGRAM={term_program})")
+        return IDEType.WINDSURF
+    
+    # Check for Cursor
+    if os.getenv("CURSOR_PID") or os.getenv("CURSOR_USER_DATA_DIR"):
+        logger.info("Detected IDE: Cursor")
+        return IDEType.CURSOR
+    
+    # Check for VS Code (check last as it's most generic)
+    if os.getenv("VSCODE_PID") or os.getenv("VSCODE_CWD") or os.getenv("VSCODE_IPC_HOOK"):
+        logger.info("Detected IDE: VS Code")
+        return IDEType.VSCODE
+    
     # Fallback: check which IDE's settings directory exists
+    logger.warning("Could not detect IDE from environment variables, checking installed IDEs...")
     ide_mgr = get_ide_manager()
     installed = ide_mgr.detect_installed_ides()
     
     # Return the first installed IDE as a guess
     if installed:
+        logger.info(f"Using first installed IDE as fallback: {installed[0]}")
         return installed[0]
     
+    logger.warning("No IDE could be detected")
     return None
 
 
@@ -1928,15 +1961,25 @@ def main():
     logger.info(f"Base directory: {BASE_DIR}")
     logger.info(f"Content directory: {CONTENT_DIR}")
     
-    # Detect workspace dynamically
+    # Detect workspace and IDE
     detected_ide = detect_current_ide()
+    logger.info("=" * 70)
+    logger.info("IDE DETECTION")
+    logger.info("=" * 70)
     logger.info(f"Current working directory: {Path.cwd()}")
-    logger.info(f"Detected IDE: {detected_ide}")
+    if detected_ide:
+        logger.info(f"✓ Detected IDE: {detected_ide.value.upper()}")
+        logger.info(f"  Rules will sync to: .{detected_ide.value}/ directories")
+    else:
+        logger.warning("⚠️  Could not detect IDE")
+        logger.warning("  Use ide(action='set', ide_name='windsurf') to set explicitly")
+    
     detected_workspace = detect_workspace_root(detected_ide)
     if detected_workspace:
-        logger.info(f"Detected workspace: {detected_workspace}")
+        logger.info(f"✓ Detected workspace: {detected_workspace}")
     else:
-        logger.info(f"Workspace: Will be detected per-request (dynamic)")
+        logger.info(f"  Workspace: Will be detected per-request (dynamic)")
+    logger.info("=" * 70)
     
     # Try to load configuration (don't block on failure)
     try:
