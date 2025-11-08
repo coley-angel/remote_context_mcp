@@ -58,6 +58,26 @@ class FrontmatterConfig:
     tags: List[str] = field(default_factory=list)
     author: Optional[str] = None
     version: Optional[str] = None
+
+
+@dataclass
+class IDEPaths:
+    """IDE-specific relative paths (all relative to workspace root)"""
+    rules: str = ".ide/rules"
+    workflows: str = ".ide/workflows"
+    prompts: str = ".ide/prompts"
+    instructions: str = ".ide/instructions"
+    mcp_config: Optional[str] = None  # Some IDEs don't support local MCP configs
+
+
+@dataclass
+class IDEProfile:
+    """IDE-specific configuration within a profile"""
+    name: str  # "windsurf", "vscode", "cursor"
+    display_name: str  # "Windsurf", "VS Code", "Cursor"
+    paths: IDEPaths = field(default_factory=IDEPaths)
+    frontmatter_defaults: FrontmatterConfig = field(default_factory=FrontmatterConfig)
+    enabled: bool = True
     
 
 @dataclass
@@ -202,14 +222,15 @@ class Profile:
     # MCP server configurations
     mcp_servers: List[MCPServerConfig] = field(default_factory=list)
     
-    # IDE settings
+    # IDE-specific configurations (key: ide name like "windsurf", "vscode", "cursor")
+    ide_configs: Dict[str, IDEProfile] = field(default_factory=dict)
+    
+    # Legacy support - will be removed
     ide_overrides: Dict[IDEType, Dict[str, Any]] = field(default_factory=dict)
+    frontmatter_defaults: FrontmatterConfig = field(default_factory=FrontmatterConfig)
     
     # Security settings
     security: SecurityConfig = field(default_factory=SecurityConfig)
-    
-    # Frontmatter defaults for rules (MDC format)
-    frontmatter_defaults: FrontmatterConfig = field(default_factory=FrontmatterConfig)
     
     # Central repository configuration
     central_repo: Optional[RemoteSource] = None
@@ -247,7 +268,73 @@ class TeamConfig:
     updated_by: Optional[str] = None
 
 
-# Default IDE Configuration Templates
+# Default IDE Profile Templates
+def get_default_ide_profiles() -> Dict[str, IDEProfile]:
+    """
+    Get default IDE profile configurations with sensible defaults
+    
+    Returns:
+        Dictionary of IDE profiles keyed by IDE name
+    """
+    return {
+        "windsurf": IDEProfile(
+            name="windsurf",
+            display_name="Windsurf",
+            paths=IDEPaths(
+                rules=".windsurf/",
+                workflows=".windsurf/",
+                prompts=".windsurf/",
+                instructions=".windsurf/",
+                mcp_config=None  # Windsurf uses global MCP config only
+            ),
+            frontmatter_defaults=FrontmatterConfig(
+                trigger="always_on",
+                priority="high",
+                tags=["windsurf", "team"],
+                author="Team"
+            ),
+            enabled=True
+        ),
+        "cursor": IDEProfile(
+            name="cursor",
+            display_name="Cursor",
+            paths=IDEPaths(
+                rules=".cursor/rules",
+                workflows=".cursor/workflows",
+                prompts=".cursor/prompts",
+                instructions=".cursor/instructions",
+                mcp_config=".cursor/mcp.json"
+            ),
+            frontmatter_defaults=FrontmatterConfig(
+                trigger="always_on",
+                priority="high",
+                tags=["cursor", "team"],
+                author="Team"
+            ),
+            enabled=True
+        ),
+        "vscode": IDEProfile(
+            name="vscode",
+            display_name="VS Code",
+            paths=IDEPaths(
+                rules=".vscode/rules",
+                workflows=".vscode/workflows",
+                prompts=".vscode/prompts",
+                instructions=".vscode/instructions",
+                mcp_config=".vscode/mcp.json"
+            ),
+            frontmatter_defaults=FrontmatterConfig(
+                trigger="always_on",
+                priority="high",
+                tags=["vscode", "team"],
+                author="Team"
+            ),
+            enabled=True
+        )
+    }
+
+
+# Default IDE Configuration Templates (LEGACY - will be removed)
 def get_default_ide_configs() -> Dict[str, IDEConfig]:
     """
     Get default IDE configurations for common IDEs

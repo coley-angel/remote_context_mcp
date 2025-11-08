@@ -1,0 +1,195 @@
+# Team Configuration V2 - Simplified, Data-Driven, IDE-Agnostic
+# All paths are relative to workspace root
+# No global paths - everything is workspace-local
+
+version: "2.0.0"
+team_name: "Engineering Team"
+
+# Central repository configuration
+central_repo_url: "https://github.com/your-org/team-configs"
+central_repo_branch: "main"
+
+# Global security settings
+global_security:
+  enabled: true
+  level: "basic"
+  scan_for_secrets: true
+  scan_for_pii: true
+
+# Profiles for different teams/environments
+profiles:
+  
+  # Default development profile
+  default:
+    active: true
+    description: "General development profile with standard guidelines"
+    
+    # Content sources (fetched from GitHub)
+    rules:
+      - repo: "your-org/coding-standards"
+        branch: "main"
+        paths: ["rules/*.md"]
+    
+    workflows:
+      - repo: "your-org/dev-workflows"
+        branch: "main"
+        paths: ["workflows/*.md"]
+    
+    prompts:
+      - repo: "your-org/ai-prompts"
+        branch: "main"
+        paths: ["prompts/*.md"]
+    
+    # MCP server configurations
+    mcp_servers:
+      - name: "github"
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-github"]
+        env:
+          GITHUB_TOKEN: "${GITHUB_TOKEN}"
+        enabled: true
+    
+    # IDE-specific configurations
+    # User will choose which IDE config to load: 1=windsurf, 2=vscode, 3=cursor
+    ide_configs:
+      
+      windsurf:
+        name: "windsurf"
+        display_name: "Windsurf"
+        enabled: true
+        
+        # All paths relative to workspace root
+        paths:
+          rules: ".windsurf/"
+          workflows: ".windsurf/"
+          prompts: ".windsurf/"
+          instructions: ".windsurf/"
+          mcp_config: null  # Windsurf doesn't support local MCP configs
+        
+        # Frontmatter defaults for rules (MDC format)
+        frontmatter_defaults:
+          trigger: always_on
+          glob: null
+          description: null
+          priority: high
+          tags: [windsurf, team-standards]
+          author: Platform Team
+          version: 1.0.0
+      
+      vscode:
+        name: "vscode"
+        display_name: "VS Code"
+        enabled: true
+        
+        paths:
+          rules: ".vscode/rules"
+          workflows: ".vscode/workflows"
+          prompts: ".vscode/prompts"
+          instructions: ".vscode/instructions"
+          mcp_config: ".vscode/mcp.json"
+        
+        frontmatter_defaults:
+          trigger: always_on
+          glob: null
+          priority: high
+          tags: [vscode, team-standards]
+          author: Platform Team
+          version: 1.0.0
+      
+      cursor:
+        name: "cursor"
+        display_name: "Cursor"
+        enabled: true
+        
+        paths:
+          rules: ".cursor/rules"
+          workflows: ".cursor/workflows"
+          prompts: ".cursor/prompts"
+          instructions: ".cursor/instructions"
+          mcp_config: ".cursor/mcp.json"
+        
+        frontmatter_defaults:
+          trigger: always_on
+          glob: null
+          priority: high
+          tags: [cursor, team-standards]
+          author: Platform Team
+          version: 1.0.0
+    
+    # Security overrides for this profile
+    security:
+      enabled: true
+      level: "basic"
+    
+    tags:
+      - "development"
+      - "general"
+  
+  # Production profile with strict settings
+  production:
+    active: false
+    description: "Production environment with strict controls"
+    
+    rules:
+      - url: "https://internal.company.com/rules/production-rules.md"
+    
+    workflows:
+      - url: "https://internal.company.com/workflows/deployment-workflow.md"
+    
+    ide_configs:
+      windsurf:
+        name: "windsurf"
+        display_name: "Windsurf"
+        enabled: true
+        paths:
+          rules: ".windsurf/"
+          workflows: ".windsurf/"
+          prompts: ".windsurf/"
+          instructions: ".windsurf/"
+        frontmatter_defaults:
+          trigger: always_on
+          priority: critical
+          tags: [windsurf, production, critical]
+          author: Platform Team
+      
+      vscode:
+        name: "vscode"
+        display_name: "VS Code"
+        enabled: true
+        paths:
+          rules: ".vscode/rules"
+          workflows: ".vscode/workflows"
+          prompts: ".vscode/prompts"
+          instructions: ".vscode/instructions"
+          mcp_config: ".vscode/mcp.json"
+        frontmatter_defaults:
+          trigger: always_on
+          priority: critical
+          tags: [vscode, production, critical]
+      
+      cursor:
+        name: "cursor"
+        display_name: "Cursor"
+        enabled: true
+        paths:
+          rules: ".cursor/rules"
+          workflows: ".cursor/workflows"
+          prompts: ".cursor/prompts"
+          instructions: ".cursor/instructions"
+          mcp_config: ".cursor/mcp.json"
+        frontmatter_defaults:
+          trigger: always_on
+          priority: critical
+          tags: [cursor, production, critical]
+    
+    security:
+      enabled: true
+      level: "strict"
+    
+    tags:
+      - "production"
+      - "strict"
+
+# Metadata
+last_updated: null
+updated_by: null

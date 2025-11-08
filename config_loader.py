@@ -9,7 +9,8 @@ from typing import Dict, Any, Optional, List
 import yaml
 from schemas import (
     TeamConfig, Profile, RemoteSource, SecurityConfig, MCPServerConfig,
-    SecurityLevel, IDEType, ContentType, FrontmatterConfig
+    SecurityLevel, IDEType, ContentType, FrontmatterConfig,
+    IDEProfile, IDEPaths, get_default_ide_profiles
 )
 
 logger = logging.getLogger(__name__)
@@ -179,7 +180,19 @@ class ConfigLoader:
         security_data = data.get("security", {})
         security = ConfigLoader._parse_security_config(security_data)
         
-        # Parse frontmatter defaults
+        # Parse IDE configs (new structure)
+        ide_configs = {}
+        ide_configs_data = data.get("ide_configs", {})
+        if ide_configs_data:
+            for ide_name, ide_data in ide_configs_data.items():
+                ide_configs[ide_name] = ConfigLoader._parse_ide_profile(ide_name, ide_data)
+            logger.info(f"Loaded {len(ide_configs)} IDE configs for profile '{name}'")
+        else:
+            # Use defaults if no IDE configs specified
+            ide_configs = get_default_ide_profiles()
+            logger.info(f"Using default IDE configs for profile '{name}'")
+        
+        # Parse frontmatter defaults (legacy support)
         frontmatter_data = data.get("frontmatter_defaults", {})
         frontmatter_defaults = ConfigLoader._parse_frontmatter_config(frontmatter_data)
         
@@ -198,6 +211,7 @@ class ConfigLoader:
             workflows=workflows,
             prompts=prompts,
             mcp_servers=mcp_servers,
+            ide_configs=ide_configs,
             ide_overrides=ide_overrides,
             security=security,
             frontmatter_defaults=frontmatter_defaults,
@@ -282,6 +296,34 @@ class ConfigLoader:
             inputs=data.get("inputs"),
             disabled=data.get("disabled"),
             autoApprove=data.get("autoApprove"),
+        )
+    
+    @staticmethod
+    def _parse_ide_paths(data: Dict[str, Any]) -> IDEPaths:
+        """Parse IDE paths configuration"""
+        return IDEPaths(
+            rules=data.get("rules", ".ide/rules"),
+            workflows=data.get("workflows", ".ide/workflows"),
+            prompts=data.get("prompts", ".ide/prompts"),
+            instructions=data.get("instructions", ".ide/instructions"),
+            mcp_config=data.get("mcp_config")
+        )
+    
+    @staticmethod
+    def _parse_ide_profile(name: str, data: Dict[str, Any]) -> IDEProfile:
+        """Parse IDE profile configuration"""
+        paths_data = data.get("paths", {})
+        paths = ConfigLoader._parse_ide_paths(paths_data)
+        
+        frontmatter_data = data.get("frontmatter_defaults", {})
+        frontmatter = ConfigLoader._parse_frontmatter_config(frontmatter_data)
+        
+        return IDEProfile(
+            name=data.get("name", name),
+            display_name=data.get("display_name", name.title()),
+            paths=paths,
+            frontmatter_defaults=frontmatter,
+            enabled=data.get("enabled", True)
         )
     
     @staticmethod
