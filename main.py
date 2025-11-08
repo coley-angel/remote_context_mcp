@@ -257,16 +257,29 @@ def detect_current_ide() -> Optional[IDEType]:
     if env_status:
         logger.debug(f"IDE detection environment variables: {env_status}")
     
-    # Check for Windsurf first (most specific)
-    # Windsurf uses Codeium infrastructure
-    if os.getenv("CODEIUM_PID") or os.getenv("WINDSURF_PID"):
-        logger.info("Detected IDE: Windsurf (via CODEIUM_PID/WINDSURF_PID)")
+    # Check for Windsurf FIRST (most specific)
+    # Windsurf uses Codeium infrastructure but also sets VSCODE_* vars
+    # So we need to check for Windsurf before checking VS Code
+    
+    # Primary Windsurf indicators
+    if os.getenv("CODEIUM_PID"):
+        logger.info("✓ Detected IDE: Windsurf (via CODEIUM_PID)")
+        return IDEType.WINDSURF
+    
+    if os.getenv("WINDSURF_PID"):
+        logger.info("✓ Detected IDE: Windsurf (via WINDSURF_PID)")
         return IDEType.WINDSURF
     
     # Check TERM_PROGRAM for Windsurf
     term_program = os.getenv("TERM_PROGRAM")
     if term_program and "windsurf" in term_program.lower():
-        logger.info(f"Detected IDE: Windsurf (via TERM_PROGRAM={term_program})")
+        logger.info(f"✓ Detected IDE: Windsurf (via TERM_PROGRAM={term_program})")
+        return IDEType.WINDSURF
+    
+    # Check if VSCODE_* vars are set but with Windsurf-specific paths
+    vscode_ipc = os.getenv("VSCODE_IPC_HOOK")
+    if vscode_ipc and ("windsurf" in vscode_ipc.lower() or "codeium" in vscode_ipc.lower()):
+        logger.info(f"✓ Detected IDE: Windsurf (via VSCODE_IPC_HOOK path containing windsurf/codeium)")
         return IDEType.WINDSURF
     
     # Check for Cursor
@@ -731,7 +744,7 @@ async def sync_team_config(
     profile_name: Optional[str] = None,
     force_update: bool = False,
     sync_to_ides: bool = True,
-    scope: str = "auto",
+    scope: str = "workspace",
     workspace_path: Optional[str] = None
 ) -> str:
     """
@@ -747,10 +760,10 @@ async def sync_team_config(
     Files are saved to IDE-specific directories based on scope:
     
     Scope Options:
-    - "auto" (default): Detects workspace automatically, falls back to global
-    - "workspace": Only sync to current workspace (.windsurf/, .cursor/, .vscode/)
+    - "workspace" (default): Only sync to current workspace (.windsurf/, .cursor/, .vscode/)
     - "global": Only sync to global user directories (~/.windsurf/, etc.)
     - "both": Sync to both global and workspace
+    - "auto": Detects workspace automatically, falls back to global if not found
     
     Global locations:
     - VS Code: ~/vscode-instructions/{profile}/
@@ -766,7 +779,8 @@ async def sync_team_config(
         profile_name: Profile to sync (uses active profile if None)
         force_update: Force pull from remote even if recently updated
         sync_to_ides: Sync to all detected IDEs (Windsurf, Cursor, VS Code)
-        scope: Where to sync - "auto", "workspace", "global", or "both"
+        scope: Where to sync - "workspace" (default), "global", "both", or "auto"
+        workspace_path: Absolute path to project root (auto-detected if not provided)
     
     Returns:
         JSON response with sync results, scope used, and any security issues
@@ -795,7 +809,21 @@ async def sync_team_config(
             if scope == "auto":
                 scope_used = "workspace"
         
-        if scope == "auto":
+        if scope == "workspace":
+            # Default behavior: sync to workspace (local)
+            if not workspace_dir:
+                workspace_dir = detect_workspace_root(current_ide)
+            if not workspace_dir:
+                return json.dumps({
+                    "success": False,
+                    "error": "No workspace provided or detected. Please provide workspace_path parameter.",
+                    "hint": "sync(action='full', workspace_path='/absolute/path/to/project')",
+                    "example": "sync(action='full', workspace_path='/Users/username/my-project')",
+                    "note": "Default scope is 'workspace' (local). Use scope='global' for global sync."
+                })
+            logger.info(f"Using workspace scope: {workspace_dir}")
+        
+        elif scope == "auto":
             # Use provided workspace_path or try to detect
             if not workspace_dir:
                 detected = detect_workspace_root(current_ide)
@@ -808,7 +836,8 @@ async def sync_team_config(
                     scope_used = "global"
                     logger.info("Auto-detected global scope (no workspace found)")
         
-        elif scope == "workspace":
+        elif scope == "workspace_old":
+            # Old workspace handling (kept for backward compatibility)
             # Must have workspace_path or be able to detect it
             if not workspace_dir:
                 workspace_dir = detect_workspace_root(current_ide)
@@ -1594,7 +1623,7 @@ async def sync(
     profile_name: Optional[str] = None,
     force_update: bool = False,
     sync_to_ides: bool = True,
-    scope: str = "auto"
+    scope: str = "workspace"
 ) -> str:
     """
     Synchronization operations - sync content from remote repositories.
@@ -1607,10 +1636,10 @@ async def sync(
         reload - Reload configuration from source
     
     Scope (for 'full' action):
-        auto - Use provided workspace_path, fallback to global if None
-        workspace - Only sync to workspace_path (.windsurf/, .cursor/, .vscode/)
+        workspace - (DEFAULT) Only sync to workspace (.windsurf/, .cursor/, .vscode/)
         global - Only sync to global user directories (~/.windsurf/, etc.)
-        both - Sync to both global and workspace_path
+        both - Sync to both global and workspace
+        auto - Use provided workspace_path, fallback to global if None
     
     Args:
         action: Operation to perform (full, check, reload)
@@ -1619,7 +1648,7 @@ async def sync(
         profile_name: Profile to sync (uses active if None)
         force_update: Force update even if recently synced
         sync_to_ides: Sync to IDE directories
-        scope: Where to sync - "auto", "workspace", "global", or "both"
+        scope: Where to sync - "workspace" (default), "global", "both", or "auto"
     
     Examples:
         # Sync to specific workspace (RECOMMENDED)
