@@ -1510,6 +1510,300 @@ async def reload_config() -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+async def list_ide_configs(profile_name: Optional[str] = None) -> str:
+    """
+    List available IDE configurations in a profile.
+    
+    V2: Shows all IDE configs defined in the profile with their paths and settings.
+    
+    Args:
+        profile_name: Profile to list IDE configs from (uses active if None)
+    
+    Returns:
+        JSON response with list of available IDE configs
+    """
+    try:
+        config = load_team_config()
+        
+        # Find the profile
+        profile = None
+        if profile_name:
+            profile = config.profiles.get(profile_name)
+            if not profile:
+                return json.dumps({
+                    "success": False,
+                    "error": f"Profile '{profile_name}' not found",
+                    "available_profiles": list(config.profiles.keys())
+                })
+        else:
+            # Get active profile
+            profile = next((p for p in config.profiles.values() if p.active), None)
+            if not profile:
+                return json.dumps({
+                    "success": False,
+                    "error": "No active profile found",
+                    "available_profiles": list(config.profiles.keys())
+                })
+        
+        # Build list of IDE configs
+        ide_list = []
+        for idx, (ide_name, ide_config) in enumerate(profile.ide_configs.items(), 1):
+            if ide_config.enabled:
+                ide_list.append({
+                    "id": idx,
+                    "name": ide_name,
+                    "display_name": ide_config.display_name,
+                    "enabled": ide_config.enabled,
+                    "paths": {
+                        "rules": ide_config.paths.rules,
+                        "workflows": ide_config.paths.workflows,
+                        "prompts": ide_config.paths.prompts,
+                        "instructions": ide_config.paths.instructions,
+                        "mcp_config": ide_config.paths.mcp_config
+                    },
+                    "frontmatter": {
+                        "trigger": ide_config.frontmatter_defaults.trigger,
+                        "priority": ide_config.frontmatter_defaults.priority,
+                        "tags": ide_config.frontmatter_defaults.tags
+                    }
+                })
+        
+        return json.dumps({
+            "success": True,
+            "profile": profile.name,
+            "available_ides": ide_list,
+            "usage": "Select an IDE by number: sync(action='full', workspace_path='/path', ide_choice=1)",
+            "note": "All paths are relative to workspace root"
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error listing IDE configs: {e}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+async def sync_with_ide_config(
+    workspace_path: Optional[str],
+    ide_choice: Optional[int],
+    ide_name: Optional[str],
+    profile_name: Optional[str],
+    force_update: bool
+) -> str:
+    """
+    Sync content using a specific IDE configuration.
+    
+    V2: Simplified sync that uses IDE config from profile.
+    All paths are workspace-relative, no global directories.
+    
+    Args:
+        workspace_path: Absolute path to project root (REQUIRED)
+        ide_choice: IDE selection by number (1, 2, 3, etc.)
+        ide_name: IDE selection by name ("windsurf", "vscode", "cursor")
+        profile_name: Profile to use (uses active if None)
+        force_update: Force update even if recently synced
+    
+    Returns:
+        JSON response with sync results
+    """
+    try:
+        # Validate workspace_path
+        if not workspace_path:
+            return json.dumps({
+                "success": False,
+                "error": "workspace_path is required",
+                "hint": "Provide absolute path to project root",
+                "example": "sync(action='full', workspace_path='/Users/username/my-project', ide_choice=1)"
+            })
+        
+        workspace_dir = Path(workspace_path)
+        if not workspace_dir.exists():
+            return json.dumps({
+                "success": False,
+                "error": f"Workspace path does not exist: {workspace_path}",
+                "hint": "Provide a valid absolute path to an existing directory"
+            })
+        
+        # Load config and find profile
+        config = load_team_config()
+        profile = None
+        
+        if profile_name:
+            profile = config.profiles.get(profile_name)
+            if not profile:
+                return json.dumps({
+                    "success": False,
+                    "error": f"Profile '{profile_name}' not found",
+                    "available_profiles": list(config.profiles.keys())
+                })
+        else:
+            profile = next((p for p in config.profiles.values() if p.active), None)
+            if not profile:
+                return json.dumps({
+                    "success": False,
+                    "error": "No active profile found"
+                })
+        
+        # Select IDE config
+        ide_config = None
+        selected_ide_name = None
+        
+        if ide_name:
+            # Select by name
+            ide_config = profile.ide_configs.get(ide_name.lower())
+            selected_ide_name = ide_name.lower()
+            if not ide_config:
+                return json.dumps({
+                    "success": False,
+                    "error": f"IDE config '{ide_name}' not found in profile '{profile.name}'",
+                    "available_ides": list(profile.ide_configs.keys()),
+                    "hint": "Use sync(action='list_ides') to see available IDE configs"
+                })
+        elif ide_choice:
+            # Select by number
+            ide_list = list(profile.ide_configs.items())
+            if ide_choice < 1 or ide_choice > len(ide_list):
+                return json.dumps({
+                    "success": False,
+                    "error": f"Invalid IDE choice: {ide_choice}",
+                    "valid_range": f"1-{len(ide_list)}",
+                    "hint": "Use sync(action='list_ides') to see available IDE configs"
+                })
+            selected_ide_name, ide_config = ide_list[ide_choice - 1]
+        else:
+            # No IDE specified - show options
+            ide_list = [f"{idx}={name} ({cfg.display_name})" 
+                        for idx, (name, cfg) in enumerate(profile.ide_configs.items(), 1)]
+            return json.dumps({
+                "success": False,
+                "error": "IDE selection required",
+                "available_ides": ide_list,
+                "hint": "Specify ide_choice (number) or ide_name (string)",
+                "examples": [
+                    "sync(action='full', workspace_path='/path', ide_choice=1)",
+                    "sync(action='full', workspace_path='/path', ide_name='windsurf')"
+                ]
+            })
+        
+        if not ide_config.enabled:
+            return json.dumps({
+                "success": False,
+                "error": f"IDE config '{selected_ide_name}' is disabled in profile '{profile.name}'"
+            })
+        
+        logger.info(f"=" * 70)
+        logger.info(f"V2 SYNC: {ide_config.display_name}")
+        logger.info(f"=" * 70)
+        logger.info(f"Profile: {profile.name}")
+        logger.info(f"IDE: {selected_ide_name}")
+        logger.info(f"Workspace: {workspace_dir}")
+        logger.info(f"Rules → {workspace_dir / ide_config.paths.rules}")
+        logger.info(f"Workflows → {workspace_dir / ide_config.paths.workflows}")
+        logger.info(f"=" * 70)
+        
+        # Fetch content from remote sources
+        from repo_manager import RepoManager
+        repo_manager = RepoManager()
+        
+        synced_files = {
+            "rules": [],
+            "workflows": [],
+            "prompts": [],
+            "instructions": []
+        }
+        
+        # Sync rules
+        if profile.rules:
+            rules_dir = workspace_dir / ide_config.paths.rules
+            rules_dir.mkdir(parents=True, exist_ok=True)
+            
+            for source in profile.rules:
+                files = await repo_manager.fetch_content(source, "rules")
+                for file_path, content in files.items():
+                    # Add frontmatter if missing
+                    from frontmatter_utils import addFrontmatterToContent
+                    content_with_frontmatter = addFrontmatterToContent(
+                        content,
+                        ide_config.frontmatter_defaults
+                    )
+                    
+                    target_file = rules_dir / Path(file_path).name
+                    target_file.write_text(content_with_frontmatter)
+                    synced_files["rules"].append(str(target_file.relative_to(workspace_dir)))
+                    logger.info(f"✓ Synced rule: {target_file.relative_to(workspace_dir)}")
+        
+        # Sync workflows
+        if profile.workflows:
+            workflows_dir = workspace_dir / ide_config.paths.workflows
+            workflows_dir.mkdir(parents=True, exist_ok=True)
+            
+            for source in profile.workflows:
+                files = await repo_manager.fetch_content(source, "workflows")
+                for file_path, content in files.items():
+                    target_file = workflows_dir / Path(file_path).name
+                    target_file.write_text(content)
+                    synced_files["workflows"].append(str(target_file.relative_to(workspace_dir)))
+                    logger.info(f"✓ Synced workflow: {target_file.relative_to(workspace_dir)}")
+        
+        # Sync prompts
+        if profile.prompts:
+            prompts_dir = workspace_dir / ide_config.paths.prompts
+            prompts_dir.mkdir(parents=True, exist_ok=True)
+            
+            for source in profile.prompts:
+                files = await repo_manager.fetch_content(source, "prompts")
+                for file_path, content in files.items():
+                    target_file = prompts_dir / Path(file_path).name
+                    target_file.write_text(content)
+                    synced_files["prompts"].append(str(target_file.relative_to(workspace_dir)))
+                    logger.info(f"✓ Synced prompt: {target_file.relative_to(workspace_dir)}")
+        
+        # Sync instructions
+        if profile.instructions:
+            instructions_dir = workspace_dir / ide_config.paths.instructions
+            instructions_dir.mkdir(parents=True, exist_ok=True)
+            
+            for source in profile.instructions:
+                files = await repo_manager.fetch_content(source, "instructions")
+                for file_path, content in files.items():
+                    target_file = instructions_dir / Path(file_path).name
+                    target_file.write_text(content)
+                    synced_files["instructions"].append(str(target_file.relative_to(workspace_dir)))
+                    logger.info(f"✓ Synced instruction: {target_file.relative_to(workspace_dir)}")
+        
+        logger.info(f"=" * 70)
+        logger.info(f"SYNC COMPLETE")
+        logger.info(f"=" * 70)
+        
+        total_files = sum(len(files) for files in synced_files.values())
+        
+        return json.dumps({
+            "success": True,
+            "message": f"Successfully synced {total_files} files",
+            "profile": profile.name,
+            "ide": {
+                "name": selected_ide_name,
+                "display_name": ide_config.display_name
+            },
+            "workspace": str(workspace_dir),
+            "synced_files": synced_files,
+            "paths": {
+                "rules": str(workspace_dir / ide_config.paths.rules),
+                "workflows": str(workspace_dir / ide_config.paths.workflows),
+                "prompts": str(workspace_dir / ide_config.paths.prompts),
+                "instructions": str(workspace_dir / ide_config.paths.instructions)
+            }
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error syncing with IDE config: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return json.dumps({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
+
 @mcp.tool()
 async def clear_cache(cache_type: str = "all") -> str:
     """
@@ -1620,58 +1914,51 @@ async def profile(
 async def sync(
     action: str = "full",
     workspace_path: Optional[str] = None,
+    ide_choice: Optional[int] = None,
+    ide_name: Optional[str] = None,
     profile_name: Optional[str] = None,
-    force_update: bool = False,
-    sync_to_ides: bool = True,
-    scope: str = "workspace"
+    force_update: bool = False
 ) -> str:
     """
     Synchronization operations - sync content from remote repositories.
     
-    ⚠️  IMPORTANT: Always provide workspace_path parameter when syncing!
+    V2: Simplified, data-driven, IDE-agnostic approach.
+    All paths are workspace-relative. User chooses which IDE config to use.
     
     Actions:
+        list_ides - List available IDE configurations in the active profile
         full - Full sync from remote repository (fetch rules, workflows, etc.)
         check - Check for updates without syncing
         reload - Reload configuration from source
     
-    Scope (for 'full' action):
-        workspace - (DEFAULT) Only sync to workspace (.windsurf/, .cursor/, .vscode/)
-        global - Only sync to global user directories (~/.windsurf/, etc.)
-        both - Sync to both global and workspace
-        auto - Use provided workspace_path, fallback to global if None
-    
     Args:
-        action: Operation to perform (full, check, reload)
-        workspace_path: **REQUIRED for workspace sync** - Absolute path to project root
-                       (where .vscode/.cursor/.windsurf directories should be created)
+        action: Operation to perform (list_ides, full, check, reload)
+        workspace_path: Absolute path to project root (REQUIRED for full sync)
+        ide_choice: IDE selection by number (1=Windsurf, 2=VS Code, 3=Cursor, etc.)
+        ide_name: IDE selection by name ("windsurf", "vscode", "cursor")
         profile_name: Profile to sync (uses active if None)
         force_update: Force update even if recently synced
-        sync_to_ides: Sync to IDE directories
-        scope: Where to sync - "workspace" (default), "global", "both", or "auto"
     
     Examples:
-        # Sync to specific workspace (RECOMMENDED)
-        sync(action="full", workspace_path="/absolute/path/to/project")
+        # List available IDE configs
+        sync(action="list_ides")
         
-        # Sync only to workspace
-        sync(action="full", workspace_path="/absolute/path/to/project", scope="workspace")
+        # Sync with IDE choice (by number)
+        sync(action="full", workspace_path="/path/to/project", ide_choice=1)
         
-        # Sync only to global user directories
-        sync(action="full", scope="global")
+        # Sync with IDE choice (by name)
+        sync(action="full", workspace_path="/path/to/project", ide_name="windsurf")
         
-        # Sync to both global and workspace
-        sync(action="full", workspace_path="/absolute/path/to/project", scope="both")
-        
-        # Other actions
+        # Check for updates
         sync(action="check")
-        sync(action="reload")
     
     Returns:
-        JSON response with sync results and scope information
+        JSON response with sync results
     """
-    if action == "full":
-        return await sync_team_config(profile_name, force_update, sync_to_ides, scope, workspace_path)
+    if action == "list_ides":
+        return await list_ide_configs(profile_name)
+    elif action == "full":
+        return await sync_with_ide_config(workspace_path, ide_choice, ide_name, profile_name, force_update)
     elif action == "check":
         return await check_for_updates()
     elif action == "reload":
@@ -1680,8 +1967,8 @@ async def sync(
         return json.dumps({
             "success": False,
             "error": f"Unknown action: {action}",
-            "available_actions": ["full", "check", "reload"],
-            "usage": "sync(action='full', scope='workspace') or sync(action='check')"
+            "available_actions": ["list_ides", "full", "check", "reload"],
+            "usage": "sync(action='list_ides') or sync(action='full', workspace_path='/path', ide_choice=1)"
         })
 
 
