@@ -76,8 +76,36 @@ class IDEProfile:
     name: str  # "windsurf", "vscode", "cursor"
     display_name: str  # "Windsurf", "VS Code", "Cursor"
     paths: IDEPaths = field(default_factory=IDEPaths)
+    
+    # Per-content-type frontmatter defaults
+    frontmatter_defaults_rules: Optional[FrontmatterConfig] = None
+    frontmatter_defaults_workflows: Optional[FrontmatterConfig] = None
+    frontmatter_defaults_prompts: Optional[FrontmatterConfig] = None
+    frontmatter_defaults_instructions: Optional[FrontmatterConfig] = None
+    
+    # Legacy: single frontmatter config (fallback if per-type not specified)
     frontmatter_defaults: FrontmatterConfig = field(default_factory=FrontmatterConfig)
     enabled: bool = True
+    
+    def get_frontmatter_for_type(self, content_type: ContentType) -> FrontmatterConfig:
+        """
+        Get frontmatter config for a specific content type
+        
+        Args:
+            content_type: The type of content
+        
+        Returns:
+            FrontmatterConfig for the content type, falls back to general default
+        """
+        type_map = {
+            ContentType.RULE: self.frontmatter_defaults_rules,
+            ContentType.WORKFLOW: self.frontmatter_defaults_workflows,
+            ContentType.PROMPT: self.frontmatter_defaults_prompts,
+            ContentType.INSTRUCTION: self.frontmatter_defaults_instructions
+        }
+        
+        specific_config = type_map.get(content_type)
+        return specific_config if specific_config is not None else self.frontmatter_defaults
     
 
 @dataclass
@@ -281,12 +309,42 @@ def get_default_ide_profiles() -> Dict[str, IDEProfile]:
             name="windsurf",
             display_name="Windsurf",
             paths=IDEPaths(
-                rules=".windsurf/",
-                workflows=".windsurf/",
-                prompts=".windsurf/",
-                instructions=".windsurf/",
+                rules=".windsurf/rules",
+                workflows=".windsurf/workflows",
+                prompts=".windsurf/prompts",
+                instructions=".windsurf/instructions",
                 mcp_config=None  # Windsurf uses global MCP config only
             ),
+            # Per-content-type frontmatter defaults
+            frontmatter_defaults_rules=FrontmatterConfig(
+                trigger="always_on",
+                priority="critical",
+                tags=["windsurf", "team", "rules"],
+                author="Team",
+                description="Team coding rules"
+            ),
+            frontmatter_defaults_workflows=FrontmatterConfig(
+                trigger="manual",
+                priority="high",
+                tags=["windsurf", "team", "workflows"],
+                author="Team",
+                description="Team workflows"
+            ),
+            frontmatter_defaults_prompts=FrontmatterConfig(
+                trigger="on_demand",
+                priority="medium",
+                tags=["windsurf", "team", "prompts"],
+                author="Team",
+                description="Team prompts"
+            ),
+            frontmatter_defaults_instructions=FrontmatterConfig(
+                trigger="always_on",
+                priority="high",
+                tags=["windsurf", "team", "instructions"],
+                author="Team",
+                description="Team instructions"
+            ),
+            # Legacy fallback
             frontmatter_defaults=FrontmatterConfig(
                 trigger="always_on",
                 priority="high",
@@ -305,6 +363,36 @@ def get_default_ide_profiles() -> Dict[str, IDEProfile]:
                 instructions=".cursor/instructions",
                 mcp_config=".cursor/mcp.json"
             ),
+            # Per-content-type frontmatter defaults
+            frontmatter_defaults_rules=FrontmatterConfig(
+                trigger="always_on",
+                priority="critical",
+                tags=["cursor", "team", "rules"],
+                author="Team",
+                description="Team coding rules"
+            ),
+            frontmatter_defaults_workflows=FrontmatterConfig(
+                trigger="manual",
+                priority="high",
+                tags=["cursor", "team", "workflows"],
+                author="Team",
+                description="Team workflows"
+            ),
+            frontmatter_defaults_prompts=FrontmatterConfig(
+                trigger="on_demand",
+                priority="medium",
+                tags=["cursor", "team", "prompts"],
+                author="Team",
+                description="Team prompts"
+            ),
+            frontmatter_defaults_instructions=FrontmatterConfig(
+                trigger="always_on",
+                priority="high",
+                tags=["cursor", "team", "instructions"],
+                author="Team",
+                description="Team instructions"
+            ),
+            # Legacy fallback
             frontmatter_defaults=FrontmatterConfig(
                 trigger="always_on",
                 priority="high",
@@ -323,6 +411,36 @@ def get_default_ide_profiles() -> Dict[str, IDEProfile]:
                 instructions=".vscode/instructions",
                 mcp_config=".vscode/mcp.json"
             ),
+            # Per-content-type frontmatter defaults
+            frontmatter_defaults_rules=FrontmatterConfig(
+                trigger="always_on",
+                priority="critical",
+                tags=["vscode", "team", "rules"],
+                author="Team",
+                description="Team coding rules"
+            ),
+            frontmatter_defaults_workflows=FrontmatterConfig(
+                trigger="manual",
+                priority="high",
+                tags=["vscode", "team", "workflows"],
+                author="Team",
+                description="Team workflows"
+            ),
+            frontmatter_defaults_prompts=FrontmatterConfig(
+                trigger="on_demand",
+                priority="medium",
+                tags=["vscode", "team", "prompts"],
+                author="Team",
+                description="Team prompts"
+            ),
+            frontmatter_defaults_instructions=FrontmatterConfig(
+                trigger="always_on",
+                priority="high",
+                tags=["vscode", "team", "instructions"],
+                author="Team",
+                description="Team instructions"
+            ),
+            # Legacy fallback
             frontmatter_defaults=FrontmatterConfig(
                 trigger="always_on",
                 priority="high",

@@ -66,7 +66,42 @@ profiles:
           instructions: ".windsurf/"
           mcp_config: null  # Windsurf doesn't support local MCP configs
         
-        # Frontmatter defaults for rules (MDC format)
+        # Per-content-type frontmatter defaults (MDC format)
+        # Each content type can have different frontmatter configuration
+        frontmatter_defaults_rules:
+          trigger: always_on
+          glob: null
+          description: "Team coding rules"
+          priority: critical
+          tags: [windsurf, team-standards, rules]
+          author: Platform Team
+          version: 1.0.0
+        
+        frontmatter_defaults_workflows:
+          trigger: manual
+          description: "Team workflows"
+          priority: high
+          tags: [windsurf, team-standards, workflows]
+          author: Platform Team
+          version: 1.0.0
+        
+        frontmatter_defaults_prompts:
+          trigger: on_demand
+          description: "AI prompts"
+          priority: medium
+          tags: [windsurf, team-standards, prompts]
+          author: Platform Team
+          version: 1.0.0
+        
+        frontmatter_defaults_instructions:
+          trigger: always_on
+          description: "Team instructions"
+          priority: high
+          tags: [windsurf, team-standards, instructions]
+          author: Platform Team
+          version: 1.0.0
+        
+        # Legacy: fallback frontmatter for any content type without specific config
         frontmatter_defaults:
           trigger: always_on
           glob: null
@@ -88,6 +123,41 @@ profiles:
           instructions: ".vscode/instructions"
           mcp_config: ".vscode/mcp.json"
         
+        # Per-content-type frontmatter defaults
+        frontmatter_defaults_rules:
+          trigger: always_on
+          glob: null
+          description: "Team coding rules"
+          priority: critical
+          tags: [vscode, team-standards, rules]
+          author: Platform Team
+          version: 1.0.0
+        
+        frontmatter_defaults_workflows:
+          trigger: manual
+          description: "Team workflows"
+          priority: high
+          tags: [vscode, team-standards, workflows]
+          author: Platform Team
+          version: 1.0.0
+        
+        frontmatter_defaults_prompts:
+          trigger: on_demand
+          description: "AI prompts"
+          priority: medium
+          tags: [vscode, team-standards, prompts]
+          author: Platform Team
+          version: 1.0.0
+        
+        frontmatter_defaults_instructions:
+          trigger: always_on
+          description: "Team instructions"
+          priority: high
+          tags: [vscode, team-standards, instructions]
+          author: Platform Team
+          version: 1.0.0
+        
+        # Legacy fallback
         frontmatter_defaults:
           trigger: always_on
           glob: null
@@ -108,6 +178,41 @@ profiles:
           instructions: ".cursor/instructions"
           mcp_config: ".cursor/mcp.json"
         
+        # Per-content-type frontmatter defaults
+        frontmatter_defaults_rules:
+          trigger: always_on
+          glob: null
+          description: "Team coding rules"
+          priority: critical
+          tags: [cursor, team-standards, rules]
+          author: Platform Team
+          version: 1.0.0
+        
+        frontmatter_defaults_workflows:
+          trigger: manual
+          description: "Team workflows"
+          priority: high
+          tags: [cursor, team-standards, workflows]
+          author: Platform Team
+          version: 1.0.0
+        
+        frontmatter_defaults_prompts:
+          trigger: on_demand
+          description: "AI prompts"
+          priority: medium
+          tags: [cursor, team-standards, prompts]
+          author: Platform Team
+          version: 1.0.0
+        
+        frontmatter_defaults_instructions:
+          trigger: always_on
+          description: "Team instructions"
+          priority: high
+          tags: [cursor, team-standards, instructions]
+          author: Platform Team
+          version: 1.0.0
+        
+        # Legacy fallback
         frontmatter_defaults:
           trigger: always_on
           glob: null

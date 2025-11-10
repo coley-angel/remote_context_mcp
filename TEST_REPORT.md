@@ -99,7 +99,7 @@ Real-world sync test with actual V1 config that has GitHub content sources.
 10/10 tests passed ✅
 ```
 
-### Sync Test (test_sync.py)
+### Sync Test - Basic (test_sync.py)
 ```
 ✅ SYNC SUCCESS
 
@@ -118,17 +118,45 @@ Result:
     "workflows": [],
     "prompts": [],
     "instructions": []
-  },
-  "paths": {
-    "rules": ".../Ops_Stack_Dev_Profiles/.windsurf",
-    "workflows": ".../Ops_Stack_Dev_Profiles/.windsurf",
-    "prompts": ".../Ops_Stack_Dev_Profiles/.windsurf",
-    "instructions": ".../Ops_Stack_Dev_Profiles/.windsurf"
   }
 }
 ```
 
 **Note:** 0 files synced because fallback config has no content sources. This is expected behavior.
+
+### Sync Test - Real Content (test_sync_v1_config.py)
+```
+✅ SYNC SUCCESS
+
+Successfully synced 3 files
+
+Total files synced: 3
+
+Files by type:
+
+  RULES: 2 files
+    ✓ .windsurf/windsurf_cascade_guidelines.team-config.default.md
+    ✓ .windsurf/code_quality_standards.team-config.default.md
+
+  WORKFLOWS: 1 files
+    ✓ .windsurf/pull_request_workflow.team-config.default.md
+```
+
+**Result:**
+- ✅ Cloned CiscoOpsStack/Ops_Stack_Dev_Profiles from GitHub
+- ✅ Fetched 3 files (2 rules, 1 workflow)
+- ✅ Applied team-config suffix: `.team-config.default.md`
+- ✅ Files written to `.windsurf/` directory
+- ✅ File tracking working correctly
+
+**Files Created:**
+```bash
+.windsurf/
+├── code_quality_standards.team-config.default.md       # Team file
+├── pull_request_workflow.team-config.default.md        # Team file
+├── windsurf_cascade_guidelines.team-config.default.md  # Team file
+└── windsurf_cascade_guidelines.md                      # User file (preserved!)
+```
 
 ## Verification
 

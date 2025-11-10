@@ -1798,11 +1798,12 @@ async def sync_with_ide_config(
                     content = item["content"]
                     source_path = item["source"]
                     
-                    # Add frontmatter if missing
+                    # Add frontmatter if missing (using content-type-specific config)
                     from frontmatter_utils import addFrontmatterToContent
+                    frontmatter_config = ide_config.get_frontmatter_for_type(ContentType.RULE)
                     content_with_frontmatter = addFrontmatterToContent(
                         content,
-                        ide_config.frontmatter_defaults
+                        frontmatter_config
                     )
                     
                     # Add team-config suffix to identify managed files
@@ -1826,13 +1827,21 @@ async def sync_with_ide_config(
                     content = item["content"]
                     source_path = item["source"]
                     
+                    # Add frontmatter if missing (using content-type-specific config)
+                    from frontmatter_utils import addFrontmatterToContent
+                    frontmatter_config = ide_config.get_frontmatter_for_type(ContentType.WORKFLOW)
+                    content_with_frontmatter = addFrontmatterToContent(
+                        content,
+                        frontmatter_config
+                    )
+                    
                     # Add team-config suffix
                     original_name = Path(source_path).stem
                     extension = Path(source_path).suffix
                     managed_name = f"{original_name}.team-config.{profile.name}{extension}"
                     
                     target_file = workflows_dir / managed_name
-                    target_file.write_text(content)
+                    target_file.write_text(content_with_frontmatter)
                     synced_files["workflows"].append(str(target_file.relative_to(workspace_dir)))
                     logger.info(f"✓ Synced workflow: {target_file.relative_to(workspace_dir)}")
         
@@ -1847,13 +1856,21 @@ async def sync_with_ide_config(
                     content = item["content"]
                     source_path = item["source"]
                     
+                    # Add frontmatter if missing (using content-type-specific config)
+                    from frontmatter_utils import addFrontmatterToContent
+                    frontmatter_config = ide_config.get_frontmatter_for_type(ContentType.PROMPT)
+                    content_with_frontmatter = addFrontmatterToContent(
+                        content,
+                        frontmatter_config
+                    )
+                    
                     # Add team-config suffix
                     original_name = Path(source_path).stem
                     extension = Path(source_path).suffix
                     managed_name = f"{original_name}.team-config.{profile.name}{extension}"
                     
                     target_file = prompts_dir / managed_name
-                    target_file.write_text(content)
+                    target_file.write_text(content_with_frontmatter)
                     synced_files["prompts"].append(str(target_file.relative_to(workspace_dir)))
                     logger.info(f"✓ Synced prompt: {target_file.relative_to(workspace_dir)}")
         
@@ -1868,13 +1885,21 @@ async def sync_with_ide_config(
                     content = item["content"]
                     source_path = item["source"]
                     
+                    # Add frontmatter if missing (using content-type-specific config)
+                    from frontmatter_utils import addFrontmatterToContent
+                    frontmatter_config = ide_config.get_frontmatter_for_type(ContentType.INSTRUCTION)
+                    content_with_frontmatter = addFrontmatterToContent(
+                        content,
+                        frontmatter_config
+                    )
+                    
                     # Add team-config suffix
                     original_name = Path(source_path).stem
                     extension = Path(source_path).suffix
                     managed_name = f"{original_name}.team-config.{profile.name}{extension}"
                     
                     target_file = instructions_dir / managed_name
-                    target_file.write_text(content)
+                    target_file.write_text(content_with_frontmatter)
                     synced_files["instructions"].append(str(target_file.relative_to(workspace_dir)))
                     logger.info(f"✓ Synced instruction: {target_file.relative_to(workspace_dir)}")
         
